@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>QA Demo</title>
+  </head>
+  <body>
+    <main>
+      <h1>Welcome back</h1>
+      <p id="login-error" role="alert" hidden>Invalid credentials</p>
+      <form id="login-form">
+        <label for="email">Email</label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          placeholder="Email"
+          required
+        />
+        <label for="password">Password</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          placeholder="Password"
+          required
+        />
+        <button id="login-button" type="submit">Login</button>
+      </form>
+      <nav aria-label="Primary navigation">
+        <a href="/dashboard.html">Dashboard</a><a href="/help.html">Help</a>
+      </nav>
+    </main>
+    <script>
+      document
+        .getElementById("login-form")
+        .addEventListener("submit", function (event) {
+          event.preventDefault();
+          const email = document.getElementById("email").value;
+          const password = document.getElementById("password").value;
+          const error = document.getElementById("login-error");
+          if (email === "demo@example.com" && password === "demo-password")
+            window.location.href = "/dashboard.html";
+          else {
+            error.hidden = false;
+          }
+        });
+    </script>
+  </body>
+</html>

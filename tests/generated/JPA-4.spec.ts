@@ -1,0 +1,36 @@
+import { expect, test } from "@playwright/test";
+
+test("JPA-4: search for a video on YouTube", async ({ page }) => {
+  const searchButton = page.getByRole("button", {
+    name: "Search",
+    exact: true,
+  });
+
+  await test.step("Open https://www.youtube.com/", async () => {
+    await page.goto("https://www.youtube.com/");
+    await expect(page).toHaveTitle("YouTube");
+  });
+
+  await test.step("Locate the Search input", async () => {
+    await searchButton.click();
+    const searchInput = page.getByRole("combobox", { name: "Search" });
+    await expect(searchInput).toBeVisible();
+    await expect(searchInput).toBeEnabled();
+  });
+
+  await test.step('Enter "Playwright testing" into the Search input', async () => {
+    const searchInput = page.getByRole("combobox", { name: "Search" });
+    await searchInput.fill("Playwright testing");
+    await expect(searchInput).toHaveValue("Playwright testing");
+  });
+
+  await test.step("Submit the search", async () => {
+    await searchButton.click();
+    await expect(page).toHaveURL(/youtube\.com\/results\?search_query=Playwright\+testing/);
+  });
+
+  await test.step("Wait for the search results page to load", async () => {
+    await expect(page).toHaveTitle("Playwright testing - YouTube");
+    await expect(page.getByRole("main")).toContainText("Playwright");
+  });
+});
