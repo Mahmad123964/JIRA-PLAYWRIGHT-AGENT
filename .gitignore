@@ -3,3 +3,25 @@ node_modules/
 playwright-report/
 test-results/
 .playwright-mcp/
+
+# Run artifacts and generated outputs
+reports/
+test-cases/
+pages/
+exploration.json
+generated-test-cases.json
+dummyjson-*.html
+
+# Machine-generated module folders written by the automation generator
+# on every run (run-approved -> generateAutomation). Hand-written reference
+# specs such as JPA-*.spec.ts stay tracked via the negation below.
+tests/generated/*/
+!tests/generated/JPA-*.spec.ts
+
+# Scratch scripts
+list-status.js
+list-todo.js
+read-ticket.js
+
+# Local editor settings; contains extension credential fields (CodeGPT.apiKey)
+.vscode/

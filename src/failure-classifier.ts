@@ -1,0 +1,15 @@
+export type FailureCategory = "A. REAL APPLICATION DEFECT" | "B. AUTOMATION / TEST IMPLEMENTATION ISSUE" | "C. ENVIRONMENT / INFRASTRUCTURE ISSUE" | "D. FLAKY / TRANSIENT FAILURE" | "E. BLOCKED / MISSING REQUIREMENT";
+export interface FailureInput { message: string; stack?: string; status?: number; test?: string; locator?: string; requirement?: string; environment?: string; timedOut?: boolean; browserUnavailable?: boolean; explorationStatus?: string; }
+export interface FailureDiagnosis { category: FailureCategory; rationale: string; retryAllowed: boolean; bugEligible: boolean; }
+
+export function classifyFailure(input: FailureInput): FailureDiagnosis {
+  const text = `${input.message} ${input.stack || ""}`.toLowerCase();
+  if (input.browserUnavailable || /executable doesn't exist|browser.*not installed|browser.*launch/i.test(text)) return { category: "C. ENVIRONMENT / INFRASTRUCTURE ISSUE", rationale: "Playwright browser runtime is unavailable; install browsers with npx playwright install.", retryAllowed: false, bugEligible: false };
+  if (input.explorationStatus === "BLOCKED" || input.explorationStatus === "FAILED" || /missing requirement|authentication required|credentials|unknown|blocked/i.test(text)) return { category: "E. BLOCKED / MISSING REQUIREMENT", rationale: "The required target, authentication, or requirement was not safely available.", retryAllowed: false, bugEligible: false };
+  if (/no tests found/i.test(text) && !input.status) return { category: "B. AUTOMATION / TEST IMPLEMENTATION ISSUE", rationale: "The failure indicates a test selection or locator implementation problem.", retryAllowed: false, bugEligible: false };
+  if (/expect.*received|expected.*received|toContainText|toHaveText|toBeVisible|assertion/i.test(text)) return { category: "A. REAL APPLICATION DEFECT", rationale: "A verified assertion failed after execution reached the application; no locator or infrastructure indicator was present.", retryAllowed: false, bugEligible: true };
+  if (/locator|strict mode|selector|element not found|no element/i.test(text) && !input.status) return { category: "B. AUTOMATION / TEST IMPLEMENTATION ISSUE", rationale: "The failure indicates a test selection or locator implementation problem.", retryAllowed: false, bugEligible: false };
+  if (input.timedOut || /timeout|timed out|connection reset|temporarily unavailable|503|502|504|network/i.test(text)) return { category: "D. FLAKY / TRANSIENT FAILURE", rationale: "The failure has transient timing or infrastructure indicators.", retryAllowed: true, bugEligible: false };
+  if (typeof input.status === "number" && input.status >= 500) return { category: "C. ENVIRONMENT / INFRASTRUCTURE ISSUE", rationale: `The target returned infrastructure status ${input.status}.`, retryAllowed: true, bugEligible: false };
+  return { category: "A. REAL APPLICATION DEFECT", rationale: "Execution reached a deterministic assertion or contract mismatch without automation or infrastructure indicators.", retryAllowed: false, bugEligible: true };
+}
