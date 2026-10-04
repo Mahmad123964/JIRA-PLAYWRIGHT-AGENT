@@ -1,21 +1,8 @@
 "use strict";
-const fs = require("fs");
-const path = require("path");
-const typescript = require("typescript");
-require.extensions[".ts"] = function (module, filename) {
-  const out = typescript.transpileModule(fs.readFileSync(filename, "utf8"), {
-    compilerOptions: {
-      module: typescript.ModuleKind.CommonJS,
-      target: typescript.ScriptTarget.ES2022,
-      esModuleInterop: true,
-    },
-    fileName: filename,
-  }).outputText;
-  module._compile(out, filename);
-};
-const { healLocator } = require(
-  path.join(__dirname, "../src/locator-healing.ts"),
-);
+// Intentionally does not import healLocator: ranking-only ranking cannot verify
+// a candidate, so this CLI is a reporting stub. The production healing path is
+// healOnSamePage (src/healing-runtime.ts) -> validatedHeal
+// (src/validated-healing.ts), which validates live and re-runs the assertion.
 function main() {
   console.error(
     "Self-healing is deterministic and requires an exploration JSON with observed elements.",

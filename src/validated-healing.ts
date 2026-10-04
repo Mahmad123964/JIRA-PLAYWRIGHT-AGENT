@@ -66,12 +66,23 @@ export async function validatedHeal(input: ValidatedHealingInput): Promise<Valid
   }
 
   for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber++) {
-    const rankedCandidate = (await import("./locator-healing")).rankHealingCandidates(input.originalLocator, intentElements, input.expectedText || input.originalName || "").find((item) => item.confidence >= (input.threshold ?? Number(process.env.SELF_HEALING_MIN_CONFIDENCE || "0.85")) && item.unique);
+    // Ranking is advisory: it proposes by confidence only. Uniqueness is a live
+    // property and is established below by validateCandidate, never assumed here.
+    const rankedCandidate = (await import("./locator-healing")).rankHealingCandidates(input.originalLocator, intentElements, input.expectedText || input.originalName || "").find((item) => item.confidence >= (input.threshold ?? Number(process.env.SELF_HEALING_MIN_CONFIDENCE || "0.85")));
     const candidateElement = rankedCandidate ? intentElements.find((item) => item.selectorCandidates.includes(rankedCandidate.selector)) : undefined;
     let validationResult: "PASS" | "FAIL" | "NOT_RUN" = "NOT_RUN";
     if (candidateElement) {
-      const validation = input.validateCandidate ? await input.validateCandidate(candidateElement) : { count: 1, visible: true, enabled: true, role: candidateElement.role, name: candidateElement.name };
-      validationResult = validation.count === 1 && validation.visible && validation.enabled && validation.role === candidateElement.role && validation.name === candidateElement.name ? "PASS" : "FAIL";
+      // FAIL CLOSED. Without a live validator there is no evidence that the
+      // candidate resolves uniquely, is visible and is enabled on the page, so
+      // validation must not be assumed. Previously an omitted validator was
+      // replaced by a fabricated {count:1, visible:true, enabled:true} that
+      // trivially satisfied every check below and reported PASS.
+      if (!input.validateCandidate) {
+        validationResult = "FAIL";
+      } else {
+        const validation = await input.validateCandidate(candidateElement);
+        validationResult = validation.count === 1 && validation.visible && validation.enabled && validation.role === candidateElement.role && validation.name === candidateElement.name ? "PASS" : "FAIL";
+      }
     }
     const decision: HealingDecision = {
       status: candidateElement && validationResult === "PASS" ? "HEALED" : "NOT_HEALED",
@@ -79,7 +90,7 @@ export async function validatedHeal(input: ValidatedHealingInput): Promise<Valid
       healedLocator: candidateElement && validationResult === "PASS" ? rankedCandidate!.selector : undefined,
       confidence: rankedCandidate?.confidence || 0,
       candidates: rankedCandidate ? [rankedCandidate] : [],
-      reason: candidateElement && validationResult === "PASS" ? "Candidate passed strict validation" : "No candidate passed strict validation",
+      reason: candidateElement && validationResult === "PASS" ? "Candidate passed strict validation" : candidateElement ? "No candidate passed strict validation" : "No candidate met the confidence threshold",
       attemptNumber,
       validationResult,
       timestamp: new Date().toISOString(),
