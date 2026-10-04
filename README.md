@@ -92,6 +92,26 @@ node scripts/defect-dry-run.js --run-id "<run-id>" --test-case "<test-case-id>"
 Write a dry-run defect plan without creating a Jira issue. The separate `run-approved` path also routes eligible category-A failures to a dry-run result.
 
 ```powershell
+npm run smoke
+npm run regression
+```
+Run the smoke and regression suites. Neither takes path arguments.
+
+`npm run smoke` reads the explicit list in `qa.config.json`. Smoke flows are never inferred: if the file is missing, malformed, lists no tests, or every declared test is absent from disk, the suite reports **`SKIPPED_NOT_CONFIGURED`** — never a pass. Each run writes `reports/<run-id>/smoke-report.json`.
+
+`npm run regression` derives its selection from evidence rather than a filesystem scan. A spec is included only when it is `READY_FOR_AUTOMATION` in an approval store **and** its last recorded per-test result was `PASS` **and** that result came from source `playwright-json`. Results from `exit-code-fallback` or `playwright-json-no-tests` are rejected outright, because they carry no per-test outcome. Every candidate is written to `reports/<run-id>/regression-selection.json` with an explicit include or exclude reason, and results to `reports/<run-id>/regression-report.json`.
+
+To attach both suites to one report, run them under the same run id and then aggregate:
+
+```powershell
+node scripts/smoke.js --run-id "<run-id>"
+node scripts/regression.js --run-id "<run-id>"
+node scripts/report-final.js --run-id "<run-id>"
+```
+
+`report-final` picks up `smoke-report.json` and `regression-report.json` automatically. `BLOCKED`, `SKIPPED` and `SKIPPED_NOT_CONFIGURED` are never rendered as a pass in the JSON or the PDF.
+
+```powershell
 npm run demo-site
 npm run typecheck
 npm run lint
@@ -101,11 +121,11 @@ Serve the local fixture site; run TypeScript validation; run the targeted forbid
 ## 4. Test suites
 
 ```powershell
-npx playwright test tests/unit          # 192 passed, 0 failed, 0 skipped
-npx playwright test tests/integration   #  14 passed
+npx playwright test tests/unit          # 214 passed, 0 failed, 0 skipped
+npx playwright test tests/integration   #  19 passed
 ```
 
-The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 11 fail-closed healing tests, 9 final-report tests and 6 CLI-argument tests.
+The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 11 fail-closed healing tests, 9 final-report tests, 6 CLI-argument tests and 22 Phase 6 smoke/regression contract tests.
 
 The **integration** suite drives real Playwright runs and the local fixture server:
 
@@ -194,21 +214,21 @@ There is no hardcoded `baseURL`. Every spec navigates to an absolute URL, which 
 | PDF report | PARTIAL — structured text-based renderer, not rich layout |
 | Jira defect sink, dry-run | IMPLEMENTED; no real issue created |
 | Jira defect sink, real creation | PARTIAL — injected client and explicit opt-in path, not verified against live Jira |
-| Smoke test wiring | PARTIAL — discovery exists; automatic config-driven runs are not wired |
-| Regression test wiring | PARTIAL — discovery exists; automatic config-driven runs are not wired |
+| Smoke test wiring | IMPLEMENTED — `npm run smoke` reads `qa.config.json`; an absent or empty list reports `SKIPPED_NOT_CONFIGURED` |
+| Regression test wiring | IMPLEMENTED — `npm run regression` selects `READY_FOR_AUTOMATION` cases whose last per-test result was `PASS` from source `playwright-json` |
 | Packaged end-to-end demo script | NOT STARTED |
-| Phase 6 automatic smoke/regression wiring | NOT STARTED |
 
 ## 10. Known limitations
 
 Verified as still open:
 
 - Two independent defect-deduplication mechanisms exist and can disagree: a SHA-256 `defectFingerprint` plus a Jira JQL `text ~` search in `src/jira-defects.ts`, and an in-memory `Defect.fingerprint` map with `findByFingerprint` in `src/defect-model.ts`.
+- Generated specs and Page Objects are keyed by module name alone (`tests/generated/<Module>/<TC-ID>.spec.ts`, `pages/<Module>/<Module>Page.ts`), so a later run **overwrites** an earlier run's file while the stored PASS baseline still refers to the earlier content. A regression baseline therefore has no content fingerprint and can select a spec that has since been regenerated. Observed in practice: `tests/generated/Auth/TC-AUTH-001.spec.ts` selected against a PASS baseline, then failed because its regenerated POM navigated to `https://example.com` while the spec body referenced fixture elements on another port.
+- Regression and smoke specs that target a live application require that target to be running; `tests/generated/**` specs generally point at the local demo fixture on a specific port, and the port is recorded in the generated file rather than configuration.
 - `npm run lint` is a targeted check for `waitForTimeout`, `nth()` and XPath, **not** ESLint with TypeScript coverage.
 - The PDF renderer is text-based, truncates its content at 5000 characters, and is not a rich paginated layout engine.
 - Jira real creation is off by default and requires an explicitly supplied Jira client plus `createReal: true`; no live creation was verified.
 - Evidence paths are checked; a missing artifact is reported as missing, not as proof of a passing run.
-- Smoke and regression discovery are not wired into automatic config-driven runs.
 - No packaged end-to-end demo script exists.
 
 Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; exit-code-fallback per-test attribution; Playwright 1.62 reporter parsing; category-A false positives from locator failures; unrecognized failures defaulting to Jira-eligible; the `qa` pipeline losing its exploration result; the hardcoded `baseURL`; `--config` no longer being gated on `storageState`; `healLocator` and `validatedHeal` no longer failing open without a validator; the fabricated `unique`/`visible`/`enabled` ranking flags; the unused `healLocator` import in `scripts/heal.js`.
