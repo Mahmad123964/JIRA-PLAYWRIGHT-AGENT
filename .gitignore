@@ -18,6 +18,13 @@ dummyjson-*.html
 tests/generated/*/
 !tests/generated/JPA-*.spec.ts
 
+# Throwaway fixture specs written at test time by
+# tests/integration/json-reporter-attribution.spec.ts. The test deletes them in
+# afterAll; if the process crashes one can survive, so they are never committed.
+# A surviving copy is still safe to collect: every test in it is guarded by
+# QA_RUN_GENERATED_FIXTURES and skips itself during normal runs.
+tests/integration/fixtures/json-attribution-generated-*.spec.ts
+
 # Scratch scripts
 list-status.js
 list-todo.js

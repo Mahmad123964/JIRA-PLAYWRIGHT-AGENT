@@ -54,12 +54,35 @@ export interface PlaywrightJsonParse { ok: boolean; reason?: string; tests: Pars
  *   `test.results[last].errors[]` as `{ message, location: { file, line, column } }`.
  * - `expectedStatus` matters for `test.fail()` tests: an actual failure is the
  *   expected outcome and therefore a PASS, and vice versa.
+ *
+ * STATUS MAPPING for the non-outcome attempt statuses. `timedOut` and
+ * `interrupted` used to be reported as BLOCKED. That was wrong: in this codebase
+ * BLOCKED means "no verdict is possible because the target, requirement or
+ * credentials were unavailable" (it is what category E maps to, and it drives
+ * run status PARTIAL). Neither a timeout nor an interruption means that -- in
+ * both cases the test DID execute against a reachable target and did not pass.
+ *
+ *  - timedOut     -> FAIL. Execution reached the application and did not
+ *                    complete within the limit. It is a failure, and it carries
+ *                    no evidence of a missing requirement. The classifier reads
+ *                    `reporterStatus: "timedOut"` and assigns D (flaky /
+ *                    transient, retryAllowed), so the documented 1-2 controlled
+ *                    retries apply. An identical repeat stays D and is never
+ *                    auto-filed, because only A is bug-eligible.
+ *  - interrupted  -> FAIL. The run was cut short (SIGINT, maxFailures, worker
+ *                    crash), so this is an infrastructure condition. The
+ *                    classifier assigns C for it via the same `reporterStatus`
+ *                    channel, which is retryable and not bug-eligible.
+ *
+ * BLOCKED is now reserved for genuine no-verdict outcomes: valid JSON with zero
+ * tests executed, and runner categories E/C.
  */
 export function classifyReporterOutcome(actualStatus: string, expectedStatus: string): ExecutionTestStatus {
   const actual = (actualStatus || "").toLowerCase();
   const expected = (expectedStatus || "passed").toLowerCase();
   if (actual === "skipped" || actual === "pending" || actual === "ignored") return "SKIPPED";
-  if (actual === "interrupted" || actual === "timedout") return "BLOCKED";
+  if (actual === "interrupted") return "FAIL";
+  if (actual === "timedout") return "FAIL";
   if (actual === "failed") return expected === "failed" ? "PASS" : "FAIL";
   if (actual === "passed") return expected === "failed" ? "FAIL" : "PASS";
   // Unknown/absent attempt status: never claim a pass.

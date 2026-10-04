@@ -199,8 +199,11 @@ test("all three specs in one run are reported separately", () => {
 
 test("outcome classification never maps skipped or interrupted to PASS", () => {
   expect(classifyReporterOutcome("skipped", "passed")).toBe("SKIPPED");
-  expect(classifyReporterOutcome("interrupted", "passed")).toBe("BLOCKED");
-  expect(classifyReporterOutcome("timedOut", "passed")).toBe("BLOCKED");
+  // A timeout and an interruption both mean the test executed and did not
+  // pass, so both are FAIL -- not BLOCKED, which is reserved for no-verdict
+  // outcomes (zero tests executed, runner categories E/C).
+  expect(classifyReporterOutcome("timedOut", "passed")).toBe("FAIL");
+  expect(classifyReporterOutcome("interrupted", "passed")).toBe("FAIL");
   expect(classifyReporterOutcome("", "passed")).toBe("FAIL");
   expect(classifyReporterOutcome("some-future-status", "passed")).toBe("FAIL");
 });
