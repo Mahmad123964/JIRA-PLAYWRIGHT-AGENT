@@ -19,6 +19,31 @@ interface JsonReporterSpec { file?: string; tests?: JsonReporterTest[]; }
 interface JsonReporterSuite { specs?: JsonReporterSpec[]; }
 interface JsonReporterOutput { suites?: JsonReporterSuite[]; }
 
+// TODO(SEVERITY: HIGH -- JSON reporter parsing is broken on Playwright 1.62;
+// per-test attribution silently degrades to the exit-code fallback below).
+// Two independent schema breaks, both verified against a real 1.62.1 run:
+//
+// 1) NESTING. Playwright 1.62 nests suites one level deeper: the top-level
+//    suite has `specs: []` and holds the real specs in `suites[].specs[]`.
+//    This function only descends `suites[].specs`, so it returns [] and every
+//    run falls through to the `result.code === 0` fallback in
+//    executePlaywright. That fallback reports the whole invocation as a single
+//    PASS/FAIL derived from the exit code, with `testPaths.join(",")` as the
+//    path and wall-clock as the duration -- so per-test results, real
+//    durations, and error attribution are all lost even though the top-level
+//    status looks correct.
+//
+// 2) STATUS FIELD. `test.status` no longer carries the outcome; it is now the
+//    expectation resolution ("expected" / "unexpected" / "flaky" / "skipped").
+//    The real per-attempt outcome and duration live in `test.results[].status`
+//    and `test.results[].duration` (test.duration is gone). "expected" falls
+//    through the mapping below to the else-branch, so once bug 1 is fixed a
+//    genuinely passing test would be recorded as FAIL.
+//
+// Fix: recurse into nested `suites[]`, read the last entry of
+// test.results[] for status/duration/errors, treat test.status as the
+// expectation resolution (not the outcome), and map skipped/interrupted
+// explicitly. NOT fixed in the --video/--screenshot commit; tracked separately.
 function parseJsonReporter(stdout: string): Array<{ path: string; status: ExecutionTestResult["status"]; durationMs: number; error?: string }> {
   try {
     const parsed = JSON.parse(stdout) as JsonReporterOutput;
@@ -36,16 +61,41 @@ function parseJsonReporter(stdout: string): Array<{ path: string; status: Execut
   } catch { return []; }
 }
 
+/**
+ * Playwright `test` command flags this runner is permitted to pass.
+ * Anything outside this set is a tooling defect in this repository, not an
+ * application failure. Verified against the `testOptions` table in
+ * playwright/lib/program.js -- notably there is NO --video and NO
+ * --screenshot CLI option; those exist only as `use` options in the config.
+ */
+export const ALLOWED_TEST_CLI_FLAGS = new Set([
+  "--project", "--browser", "--config", "--trace", "--reporter",
+  "--retries", "--workers", "--timeout", "--output", "--grep", "--max-failures",
+]);
+
+export function buildPlaywrightArgs(testPaths: string[], options: ExecutionOptions, cwd: string): string[] {
+  const runnerPaths = testPaths.map((testPath) => path.relative(cwd, path.resolve(testPath)).replace(/\\/g, "/"));
+  const args = ["test", ...runnerPaths];
+  if (options.project) args.push("--project", options.project);
+  if (options.browser) args.push("--browser", options.browser);
+  // TODO: --config is gated on options.storageState, which is semantically
+  // unrelated. The runner therefore never passes the config file explicitly
+  // and silently depends on Playwright's implicit auto-discovery from `cwd`.
+  // If `cwd` is ever passed explicitly, playwright.config.ts (and the
+  // use.video/use.screenshot artifact settings it now carries) is bypassed
+  // entirely. Fix: gate --config on the presence of the config file, not on
+  // storageState. Tracked rather than fixed in the --video/--screenshot commit.
+  if (options.storageState) args.push("--config", path.resolve(cwd, "playwright.config.ts"));
+  // --trace is the only artifact-capture option the Playwright CLI accepts.
+  if (options.captureArtifacts !== false) args.push("--trace", "retain-on-failure");
+  args.push("--reporter", "json");
+  return args;
+}
+
 export async function executePlaywright(testPaths: string[], options: ExecutionOptions): Promise<ExecutionResult> {
   const cwd = options.cwd || process.cwd(); const outputRoot = options.outputRoot || path.resolve("test-results", options.runId); const evidence = new EvidenceManager(options.runId, outputRoot);
   const cliPath = require.resolve("@playwright/test/cli");
-  const runnerPaths = testPaths.map((testPath) => path.relative(cwd, path.resolve(testPath)).replace(/\\/g, "/"));
-  const args = [cliPath, "test", ...runnerPaths];
-  if (options.project) args.push("--project", options.project);
-  if (options.browser) args.push("--browser", options.browser);
-  if (options.storageState) args.push("--config", path.resolve(cwd, "playwright.config.ts"));
-  if (options.captureArtifacts !== false) args.push("--trace", "retain-on-failure", "--video", "retain-on-failure", "--screenshot", "only-on-failure");
-  args.push("--reporter", "json");
+  const args = [cliPath, ...buildPlaywrightArgs(testPaths, options, cwd)];
   const command = `${process.execPath} ${args.join(" ")}`; const started = Date.now();
   const childEnv = { ...process.env, ...(options.healingFile ? { QA_HEALING_FILE: path.resolve(options.healingFile) } : {}) };
   const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => { const child = spawn(process.execPath, args, { cwd, shell: false, env: childEnv }); let stdout = ""; let stderr = ""; child.stdout.on("data", (d) => { stdout += d.toString(); }); child.stderr.on("data", (d) => { stderr += d.toString(); }); child.on("close", (code) => resolve({ code, stdout, stderr })); child.on("error", (error) => resolve({ code: null, stdout, stderr: `${stderr}${error.message}` })); });
