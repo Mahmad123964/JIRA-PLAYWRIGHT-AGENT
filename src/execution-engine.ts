@@ -6,7 +6,7 @@ import { classifyFailure, type FailureDiagnosis } from "./failure-classifier";
 import { sanitizeSecrets } from "./document-ingestion";
 import type { ValidatedHealingResult } from "./validated-healing";
 
-export interface ExecutionOptions { runId: string; cwd?: string; browser?: string; project?: string; environment?: string; timeoutMs?: number; outputRoot?: string; storageState?: string; captureArtifacts?: boolean; healingFile?: string; configPath?: string; }
+export interface ExecutionOptions { runId: string; cwd?: string; browser?: string; project?: string; environment?: string; timeoutMs?: number; outputRoot?: string; storageState?: string; captureArtifacts?: boolean; healingFile?: string; configPath?: string; outputDir?: string; }
 export type ExecutionTestStatus = "PASS" | "FAIL" | "BLOCKED" | "SKIPPED";
 /**
  * Where a reported per-test result actually came from. `playwright-json` is a
@@ -185,6 +185,10 @@ export function buildPlaywrightArgs(testPaths: string[], options: ExecutionOptio
   if (fs.existsSync(configPath)) args.push("--config", configPath);
   // --trace is the only artifact-capture option the Playwright CLI accepts.
   if (options.captureArtifacts !== false) args.push("--trace", "retain-on-failure");
+  // Playwright's own output directory. Concurrent nested runs that share the
+  // default test-results/ wipe each other's artifacts at startup, so callers
+  // that assert on captured artifacts should pass a private directory.
+  if (options.outputDir) args.push("--output", path.resolve(options.outputDir));
   args.push("--reporter", "json");
   return args;
 }

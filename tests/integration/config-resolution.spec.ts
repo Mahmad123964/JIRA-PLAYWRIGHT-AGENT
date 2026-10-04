@@ -74,18 +74,19 @@ test.describe("playwright config resolution", () => {
     });
   });
 
-  test("an explicit foreign cwd still gets video and screenshot from the config", async () => {
-    const resultsRoot = path.join(REPO_ROOT, "test-results");
-    // Playwright derives its output directory from the spec file name and
-    // abbreviates long words in the slug, so it is not predictable. Keying on
-    // write time avoids guessing the slug and avoids relying on a clean tree.
-    const startedAt = Date.now();
+test("an explicit foreign cwd still gets video and screenshot from the config", async () => {
+    // A private Playwright output directory: concurrent nested runs sharing the
+    // default test-results/ delete each other's artifacts at startup, which made
+    // this assertion flaky under the full integration suite.
+    const artifactsRoot = path.join(REPO_ROOT, "test-results", `${RUN_ID}-artifacts`);
+    fs.rmSync(artifactsRoot, { recursive: true, force: true });
 
     const result = await executePlaywright([FIXTURE], {
       runId: RUN_ID,
       cwd: PARENT_DIR,
       captureArtifacts: true,
-      outputRoot: path.join(resultsRoot, RUN_ID),
+      outputRoot: path.join(REPO_ROOT, "test-results", RUN_ID),
+      outputDir: artifactsRoot,
     });
 
     // The spec ran and failed for real, from a per-test JSON result.
@@ -94,8 +95,8 @@ test.describe("playwright config resolution", () => {
     expect(result.tests[0].status).toBe("FAIL");
 
     // retain-on-failure only keeps artifacts for a failing run, and this one failed.
-    const videos = freshArtifacts(resultsRoot, ".webm", startedAt);
-    const shots = freshArtifacts(resultsRoot, ".png", startedAt);
+    const videos = artifactsUnder(artifactsRoot, ".webm");
+    const shots = artifactsUnder(artifactsRoot, ".png");
 
     expect(videos.length, "use.video retain-on-failure should record a video").toBeGreaterThan(0);
     expect(shots.length, "use.screenshot only-on-failure should capture a screenshot").toBeGreaterThan(0);

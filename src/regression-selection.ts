@@ -47,9 +47,9 @@ export interface RegressionSelection {
   warnings: string[];
 }
 
-interface StoredTest { path?: string; title?: string; status?: string; source?: string }
-interface StoredGenerated { path?: string; kind?: string; testCaseId?: string }
-interface StoredRun {
+export interface StoredTest { path?: string; title?: string; status?: string; source?: string }
+export interface StoredGenerated { path?: string; kind?: string; testCaseId?: string }
+export interface StoredRun {
   runId?: string;
   timestamp?: string;
   storeId?: string;
