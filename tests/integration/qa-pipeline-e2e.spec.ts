@@ -5,6 +5,7 @@ import path from "path";
 import { runQaPipeline } from "../../src/qa-pipeline";
 import { approveTestCase, markReadyForAutomation, loadApprovalStore, saveApprovalStore } from "../../src/approval-store";
 import { runApprovedCases } from "../../src/approved-runner";
+import { removeScopedArtifacts } from "./support/run-artifacts";
 
 /**
  * End-to-end coverage for the `npm run qa` path.
@@ -69,7 +70,7 @@ test("qa pipeline store carries the exploration so run-approved reaches executio
   const result = await runApprovedCases({
     storeId: store!.storeId,
     runId: "qa-pipeline-e2e-run",
-    outputRoot: "test-results/qa-pipeline-e2e-run",
+
     captureArtifacts: false,
   });
 
@@ -78,6 +79,8 @@ test("qa pipeline store carries the exploration so run-approved reaches executio
   expect(result.exploration.source).toBe("store");
   expect(result.automation.status).toBe("SUCCESS");
   expect(result.automation.blocked).toHaveLength(0);
+
+  removeScopedArtifacts(store!.storeId);
 
   const saved = JSON.parse(fs.readFileSync(path.resolve(result.resultPath!), "utf8"));
   expect(saved.status).toBe("SUCCESS");

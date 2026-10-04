@@ -111,7 +111,7 @@ export async function runApprovedCases(options: ApprovedRunnerOptions): Promise<
   // pages/Auth/AuthPage.ts, leaving a spec generated against a fixture port
   // paired with a POM that navigated somewhere else entirely.
   const generationRoot = options.automationRoot || options.outputRoot || process.cwd();
-  const automation = generateAutomation({ testCases: executable, explorationResult: exploration.result, outputRoot: generationRoot, source: { jiraKey: undefined, sourceReferences: executable.flatMap((item) => item.sources), explorationReferences: executable.flatMap((item) => item.explorationReferences) } });
+  const automation = generateAutomation({ testCases: executable, explorationResult: exploration.result, outputRoot: generationRoot, artifactScope: store.storeId, source: { jiraKey: undefined, sourceReferences: executable.flatMap((item) => item.sources), explorationReferences: executable.flatMap((item) => item.explorationReferences) } });
   if (automation.status !== "SUCCESS") return { runId, storeId: store.storeId, status: "BLOCKED", approval: { readyCaseIds, excludedCaseIds: store.testCases.filter((item) => !readyCaseIds.includes(item.testCaseId)).map((item) => item.testCaseId), blockedCases }, exploration: { status: exploration.result.explorationStatus, source: exploration.source, path: exploration.path, reason: exploration.reason }, automation };
 
   const specPaths = automation.generated.filter((file) => file.kind === "spec").map((file) => file.path);

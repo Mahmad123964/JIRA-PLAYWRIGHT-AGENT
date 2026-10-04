@@ -13,6 +13,13 @@ export interface AutomationGenerationInput {
   testCases: TestCase[];
   explorationResult?: ExplorationResult;
   outputRoot?: string;
+  /**
+   * Namespace applied to the generated output directory. Supplying it (the
+   * approved runner derives it from the approval store id) guarantees that two
+   * runs of the same module cannot overwrite each other's POM or specs, and that
+   * a spec always sits beside the POM generated from the same exploration.
+   */
+  artifactScope?: string;
   allowPartialExploration?: boolean;
   source?: GeneratorSource;
 }
@@ -21,6 +28,10 @@ export interface GeneratedAutomationFile {
   path: string;
   kind: "pom" | "spec";
   testCaseId?: string;
+  /** Target URL this artifact was generated against. */
+  targetUrl?: string;
+  /** Namespace applied to the output directory, when one was used. */
+  artifactScope?: string;
 }
 
 export interface AutomationGenerationResult {
@@ -76,7 +87,7 @@ function renderPom(pageName: string, selectors: Array<{ name: string; expression
   return `import { expect, type Page } from "@playwright/test";\n\n/** Generated from verified browser observations. URL: ${url} */\nexport class ${pageName} {\n${declarations}\n  constructor(readonly page: Page) {\n${assignments}\n  }\n\n  async open(): Promise<void> { await this.page.goto(${quote(url)}); }\n${actions}\n}\n`;
 }
 
-function renderSpec(tc: TestCase, pageName: string, jiraKey?: string, exploration?: ExplorationResult, importPrefix = "../../../"): string {
+function renderSpec(tc: TestCase, pageName: string, jiraKey?: string, exploration?: ExplorationResult, importPrefix = "../../../", moduleDirName?: string): string {
   const observedElements = exploration?.elements || [];
   const steps = tc.steps.map((step) => {
     const locator = selectorExpression(step.selectorHint);
@@ -92,7 +103,7 @@ function renderSpec(tc: TestCase, pageName: string, jiraKey?: string, exploratio
       : action;
     return `    await test.step(${quote(`Step ${step.step}: ${step.action}`)}, async () => {\n      ${guardedAction}\n      // Expected: ${step.expected.replace(/\n/g, " ")}\n    });`;
   }).join("\n");
-  return `import { test, expect } from "@playwright/test";\nimport { healOnSamePage, locatorForObservedElement } from "${importPrefix}src/healing-runtime";\nimport type { DiscoveredElement } from "${importPrefix}src/browser-explorer";\nimport { ${pageName} } from "${importPrefix}pages/${safeName(tc.module, "module")}/${pageName}";\n\n/**\n * Test case: ${tc.testCaseId}\n * Jira: ${jiraKey || "Not available / not applicable."}\n * Sources: ${tc.sources.map((source) => source.type).join(", ")}\n * Exploration references: ${tc.explorationReferences.join(", ") || "none"}\n * Generated: ${tc.generatedAt}\n */\ntest.describe(${quote(tc.module)}, () => {\n  test(${quote(`${tc.testCaseId}: ${tc.title}`)}, async ({ page }) => {\n    const model = new ${pageName}(page);\n    const observedElements = ${JSON.stringify(observedElements)} as DiscoveredElement[];\n    await test.step("Open verified target", async () => { await model.open(); });\n${steps}\n    await test.step("Verify expected result", async () => {\n      // Expected: ${tc.expectedResult.replace(/\n/g, " ")}\n      expect(${quote(tc.expectedResult)}).not.toContain("UNKNOWN");\n    });\n  });\n});\n`;
+  return `import { test, expect } from "@playwright/test";\nimport { healOnSamePage, locatorForObservedElement } from "${importPrefix}src/healing-runtime";\nimport type { DiscoveredElement } from "${importPrefix}src/browser-explorer";\nimport { ${pageName} } from "${importPrefix}pages/${moduleDirName || safeName(tc.module, "module")}/${pageName}";\n\n/**\n * Test case: ${tc.testCaseId}\n * Jira: ${jiraKey || "Not available / not applicable."}\n * Sources: ${tc.sources.map((source) => source.type).join(", ")}\n * Exploration references: ${tc.explorationReferences.join(", ") || "none"}\n * Generated: ${tc.generatedAt}\n */\ntest.describe(${quote(tc.module)}, () => {\n  test(${quote(`${tc.testCaseId}: ${tc.title}`)}, async ({ page }) => {\n    const model = new ${pageName}(page);\n    const observedElements = ${JSON.stringify(observedElements)} as DiscoveredElement[];\n    await test.step("Open verified target", async () => { await model.open(); });\n${steps}\n    await test.step("Verify expected result", async () => {\n      // Expected: ${tc.expectedResult.replace(/\n/g, " ")}\n      expect(${quote(tc.expectedResult)}).not.toContain("UNKNOWN");\n    });\n  });\n});\n`;
 }
 
 export function validateAutomationInput(input: AutomationGenerationInput): { valid: boolean; error?: string } {
@@ -115,8 +126,21 @@ export function generateAutomation(input: AutomationGenerationInput): Automation
   if (!validation.valid) return { status: "BLOCKED", generated: [], blocked: input?.testCases?.map((tc) => ({ testCaseId: tc.testCaseId, reason: validation.error! })) || [], warnings: [validation.error!] };
   const root = path.resolve(input.outputRoot || process.cwd());
   const moduleName = safeName(input.testCases[0]?.module || "module", "module");
-  const moduleDir = path.join(root, "pages", moduleName);
-  const specDir = path.join(root, "tests", "generated", moduleName);
+  // ARTIFACT ISOLATION.
+  //
+  // Output used to be keyed by module name alone, so every run of the same
+  // module overwrote the previous run's POM and specs. Two runs of module "Auth"
+  // against different targets (for example the fixture on 127.0.0.1:4173 and on
+  // 127.0.0.1:4193) fought over one pages/Auth/AuthPage.ts, and the loser left a
+  // spec paired with a POM that navigated somewhere else entirely.
+  //
+  // `artifactScope` namespaces the output directory when supplied, so a spec and
+  // the POM it imports always come from the same generation and the same target
+  // URL, and two runs (or two cases in separate generations) cannot clobber each
+  // other. It is derived from the approval store id by the caller.
+  const scope = safeName(input.artifactScope || "", "");
+  const moduleDir = path.join(root, "pages", scope ? `${moduleName}__${scope}` : moduleName);
+  const specDir = path.join(root, "tests", "generated", scope ? `${moduleName}__${scope}` : moduleName);
   fs.mkdirSync(moduleDir, { recursive: true });
   fs.mkdirSync(specDir, { recursive: true });
   const generated: GeneratedAutomationFile[] = [];
@@ -124,12 +148,12 @@ export function generateAutomation(input: AutomationGenerationInput): Automation
   const selectors = collectSelectors(input.testCases);
   const pomPath = path.join(moduleDir, `${pageName}.ts`);
   fs.writeFileSync(pomPath, renderPom(pageName, selectors, input.explorationResult!.target.url), "utf8");
-  generated.push({ path: pomPath, kind: "pom" });
+  generated.push({ path: pomPath, kind: "pom", targetUrl: input.explorationResult!.target.url, artifactScope: scope || undefined });
   for (const tc of input.testCases) {
     const specPath = path.join(specDir, `${safeName(tc.testCaseId, "test")}.spec.ts`);
     const importPrefix = `${path.relative(specDir, root).replace(/\\/g, "/") || "."}/`;
-    fs.writeFileSync(specPath, renderSpec(tc, pageName, input.source?.jiraKey, input.explorationResult, importPrefix), "utf8");
-    generated.push({ path: specPath, kind: "spec", testCaseId: tc.testCaseId });
+    fs.writeFileSync(specPath, renderSpec(tc, pageName, input.source?.jiraKey, input.explorationResult, importPrefix, scope ? `${moduleName}__${scope}` : moduleName), "utf8");
+    generated.push({ path: specPath, kind: "spec", testCaseId: tc.testCaseId, targetUrl: input.explorationResult!.target.url, artifactScope: scope || undefined });
   }
   return { status: "SUCCESS", generated, blocked: [], warnings: selectors.length ? [] : ["No verified selectors were available; generated files require manual implementation"] };
 }

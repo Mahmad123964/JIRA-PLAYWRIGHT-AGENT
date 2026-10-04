@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { executePlaywright, resolveRepoConfigPath } from "../../src/execution-engine";
 
@@ -75,33 +76,38 @@ test.describe("playwright config resolution", () => {
   });
 
 test("an explicit foreign cwd still gets video and screenshot from the config", async () => {
-    // A private Playwright output directory: concurrent nested runs sharing the
-    // default test-results/ delete each other's artifacts at startup, which made
-    // this assertion flaky under the full integration suite.
-    const artifactsRoot = path.join(REPO_ROOT, "test-results", `${RUN_ID}-artifacts`);
-    fs.rmSync(artifactsRoot, { recursive: true, force: true });
+    // The artifacts directory is created in the OS temp directory, NOT under
+    // test-results/: Playwright wipes its output directory at startup, so any
+    // run using the default output dir would delete a private subdirectory of
+    // test-results while this test is still asserting on it. That made the
+    // assertion flaky whenever other integration tests ran in parallel.
+    const artifactsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pw-config-resolution-"));
 
-    const result = await executePlaywright([FIXTURE], {
-      runId: RUN_ID,
-      cwd: PARENT_DIR,
-      captureArtifacts: true,
-      outputRoot: path.join(REPO_ROOT, "test-results", RUN_ID),
-      outputDir: artifactsRoot,
-    });
+    try {
+      const result = await executePlaywright([FIXTURE], {
+        runId: RUN_ID,
+        cwd: PARENT_DIR,
+        captureArtifacts: true,
+        outputRoot: path.join(REPO_ROOT, "test-results", RUN_ID),
+        outputDir: artifactsRoot,
+      });
 
-    // The spec ran and failed for real, from a per-test JSON result.
-    expect(result.tests).toHaveLength(1);
-    expect(result.tests[0].source).toBe("playwright-json");
-    expect(result.tests[0].status).toBe("FAIL");
+      // The spec ran and failed for real, from a per-test JSON result.
+      expect(result.tests).toHaveLength(1);
+      expect(result.tests[0].source).toBe("playwright-json");
+      expect(result.tests[0].status).toBe("FAIL");
 
-    // retain-on-failure only keeps artifacts for a failing run, and this one failed.
-    const videos = artifactsUnder(artifactsRoot, ".webm");
-    const shots = artifactsUnder(artifactsRoot, ".png");
+      // retain-on-failure only keeps artifacts for a failing run, and this one failed.
+      const videos = artifactsUnder(artifactsRoot, ".webm");
+      const shots = artifactsUnder(artifactsRoot, ".png");
 
-    expect(videos.length, "use.video retain-on-failure should record a video").toBeGreaterThan(0);
-    expect(shots.length, "use.screenshot only-on-failure should capture a screenshot").toBeGreaterThan(0);
-    for (const file of [...videos, ...shots]) {
-      expect(fs.statSync(file).size).toBeGreaterThan(0);
+      expect(videos.length, "use.video retain-on-failure should record a video").toBeGreaterThan(0);
+      expect(shots.length, "use.screenshot only-on-failure should capture a screenshot").toBeGreaterThan(0);
+      for (const file of [...videos, ...shots]) {
+        expect(fs.statSync(file).size).toBeGreaterThan(0);
+      }
+    } finally {
+      fs.rmSync(artifactsRoot, { recursive: true, force: true });
     }
   });
 

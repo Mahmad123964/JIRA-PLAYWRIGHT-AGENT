@@ -6,6 +6,7 @@ import { createApprovalStore, saveApprovalStore, approveTestCase, markReadyForAu
 import { runApprovedCases } from "../../src/approved-runner";
 import type { ExplorationResult } from "../../src/browser-explorer";
 import type { TestCase } from "../../src/test-case-generator";
+import { removeScopedArtifacts } from "./support/run-artifacts";
 
 let server: ChildProcess;
 const port = 4191;
@@ -33,7 +34,8 @@ test("run-approved performs same-page healing and persists PASS_AFTER_HEALING", 
   approveTestCase(store, testCase.testCaseId, "integration-reviewer");
   markReadyForAutomation(store, testCase.testCaseId);
   saveApprovalStore(store);
-  const result = await runApprovedCases({ storeId: store.storeId, runId: "integration-healing", outputRoot: "test-results/integration-healing", captureArtifacts: false });
+  const result = await runApprovedCases({ storeId: store.storeId, runId: "integration-healing", captureArtifacts: false });
+  removeScopedArtifacts(store.storeId);
   expect(result.resultPath).toBeTruthy();
   const saved = JSON.parse(fs.readFileSync(path.resolve(result.resultPath!), "utf8"));
   expect(saved.healing.some((item: { outcome: string }) => item.outcome === "PASS_AFTER_HEALING")).toBe(true);
@@ -49,7 +51,8 @@ test("run-approved routes a real assertion failure to Jira dry-run defect output
   approveTestCase(store, testCase.testCaseId, "integration-reviewer");
   markReadyForAutomation(store, testCase.testCaseId);
   saveApprovalStore(store);
-  const result = await runApprovedCases({ storeId: store.storeId, runId: "integration-defect", outputRoot: "test-results/integration-defect", captureArtifacts: false });
+  const result = await runApprovedCases({ storeId: store.storeId, runId: "integration-defect", captureArtifacts: false });
+  removeScopedArtifacts(store.storeId);
   const saved = JSON.parse(fs.readFileSync(path.resolve(result.resultPath!), "utf8"));
   expect(saved.defects).toHaveLength(1);
   expect(saved.defects[0].status).toBe("WOULD_CREATE");
@@ -64,7 +67,8 @@ test("run-approved records removed-element healing rejection as FAIL for human r
   approveTestCase(store, testCase.testCaseId, "integration-reviewer");
   markReadyForAutomation(store, testCase.testCaseId);
   saveApprovalStore(store);
-  const result = await runApprovedCases({ storeId: store.storeId, runId: "integration-removed", outputRoot: "test-results/integration-removed", captureArtifacts: false });
+  const result = await runApprovedCases({ storeId: store.storeId, runId: "integration-removed", captureArtifacts: false });
+  removeScopedArtifacts(store.storeId);
   expect(result.resultPath).toBeTruthy();
   const saved = JSON.parse(fs.readFileSync(path.resolve(result.resultPath!), "utf8"));
   expect(saved.status).toBe("FAILED");
