@@ -13,7 +13,7 @@
     "execute-tests": "node scripts/execute-tests.js",
     "diagnose": "node scripts/diagnose.js",
     "heal": "node scripts/heal.js",
-    "smoke": "node scripts/regression.js --smoke",
+    "smoke": "node scripts/smoke.js",
     "regression": "node scripts/regression.js",
     "report": "node scripts/report.js",
     "report-final": "node scripts/report-final.js",

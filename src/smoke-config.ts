@@ -46,9 +46,12 @@ export function loadSmokeConfig(root: string = process.cwd()): SmokeConfig {
     return { configPath, configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} was not found; no smoke flows were invented` };
   }
 
-  let parsed: unknown;
+let parsed: unknown;
   try {
-    parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    // Strip a UTF-8 BOM: several editors and PowerShell's utf8 writer emit one,
+    // and it would otherwise be reported as malformed JSON.
+    const raw = fs.readFileSync(configPath, "utf8").replace(/^\uFEFF/, "");
+    parsed = JSON.parse(raw);
   } catch (error) {
     return { configPath, configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} is not valid JSON: ${(error as Error).message}` };
   }
