@@ -69,13 +69,18 @@ const TOOLING_INVOCATION = /unknown option|unknown argument|unrecognized option|
 /**
  * The locator never resolved to the intended element. Automation, category B.
  *
- * Only definitive indicators count. "waiting for getByRole(...)" is deliberately
- * NOT one of them: Playwright narrates every wait that way, including in call
- * logs that end with "locator resolved to <h1>...</h1>" and then fail on the
- * assertion -- which is category A. Treating a bare wait as a locator failure
- * would misclassify genuine application defects.
+ * `element(?:\(s\))? not found` matches BOTH "element not found" and Playwright's
+ * literal Received placeholder `<element(s) not found>`. The placeholder matters:
+ * a removed element fails an ordinary toBeVisible() assertion with an
+ * expected/received diff present, so without this alternative the payload falls
+ * through to the category A gate below and a removed element is auto-confirmed as
+ * a defect instead of being flagged for human review (Phase 3C).
+ *
+ * "waiting for getByRole(...)" is deliberately NOT an indicator: Playwright
+ * narrates every wait that way, including in call logs that end with "locator
+ * resolved to <h1>...</h1>" and then fail on the assertion -- which is category A.
  */
-const LOCATOR_UNRESOLVED = /locator_not_found|locator_notfound|strict mode violation|resolved to 0\b|no element(?:s)? (?:matching|found|visible)|element not found|target (?:was )?not found|no nodes found/i;
+const LOCATOR_UNRESOLVED = /locator_not_found|locator_notfound|strict mode violation|resolved to 0\b|no element(?:s)? (?:matching|found|visible)|element(?:\(s\))? not found|target (?:was )?not found|no nodes found/i;
 
 /**
  * Genuinely missing or unclear requirements only. The bare /unknown/ and bare
@@ -136,7 +141,7 @@ export function classifyFailure(input: FailureInput): FailureDiagnosis {
   //    purpose: if the element never resolved there is no comparison against a
   //    requirement, so it can never be a verified application defect.
   if (LOCATOR_UNRESOLVED.test(body)) {
-    return { category: CATEGORY_B, rationale: "The locator did not resolve to the intended element, so the test never reached the assertion. A removed or renamed element may also indicate an application change, which validated-healing flags separately as HUMAN_REVIEW_REQUIRED for a human to judge; it is not auto-filed as a defect.", retryAllowed: false, bugEligible: false };
+    return { category: CATEGORY_B, rationale: "The locator did not resolve to the intended element, so the test never reached the assertion and no contract mismatch can be proven. A removed or renamed element is a possible real application change: validated-healing flags it as HUMAN_REVIEW_REQUIRED for a human to judge, and it is not auto-filed as a defect.", retryAllowed: false, bugEligible: false };
   }
 
   // 6. Transient / flaky. Keyed on the reporter's own verdict where possible.

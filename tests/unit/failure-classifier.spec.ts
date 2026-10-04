@@ -48,6 +48,36 @@ const AUTH_WALL = "login required before the target page could be reached";
 
 const UNRECOGNIZED = "Something entirely unexpected happened during fixture teardown";
 
+// Real Playwright 1.62 rendering when the element is gone from the page. The
+// Received value is Playwright's literal placeholder, and an expected/received
+// diff IS present -- so only the placeholder identifies this as unresolved.
+const REMOVED_ELEMENT_VISIBLE = `Error: expect(locator).toBeVisible() failed
+
+Locator:  getByRole('button', { name: 'Old Removed action' })
+Expected: visible
+Received: <element(s) not found>
+Timeout: 5000ms
+
+Call log:
+  - Expect "toBeVisible" with timeout 5000ms
+  - waiting for getByRole('button', { name: 'Old Removed action' })
+`;
+
+const URL_MISMATCH = `Error: expect(page).toHaveURL(expected) failed
+
+Expected: "https://example.test/dashboard"
+Received: "https://example.test/login"
+Timeout: 5000ms
+`;
+
+const TEXT_MISMATCH = `Error: expect(locator).toHaveText(expected) failed
+
+Locator: getByRole('heading', { name: 'Welcome back' })
+Expected string: "Welcome back, Ahmad"
+Received string: "Welcome back"
+Timeout: 5000ms
+`;
+
 test.describe("failure classifier categories", () => {
   test("A: verified expected/received mismatch after the locator resolved", () => {
     const result = classifyFailure({ message: VERIFIED_MISMATCH, reporterStatus: "failed" });
@@ -170,6 +200,42 @@ Timeout: 5000ms
     // healing layer's HUMAN_REVIEW_REQUIRED flag, rather than as a Jira defect.
     expect(result.rationale).toContain("HUMAN_REVIEW_REQUIRED");
     expect(result.rationale).toContain("not auto-filed");
+  });
+});
+
+test.describe("removed element versus genuine mismatch", () => {
+  test("toBeVisible on a removed element is B, not an auto-confirmed defect", () => {
+    // The payload DOES carry an expected/received diff, so the category A gate
+    // would otherwise claim it. Only the literal Received placeholder
+    // "<element(s) not found>" reveals the element never resolved.
+    const result = classifyFailure({ message: REMOVED_ELEMENT_VISIBLE, reporterStatus: "failed" });
+    expect(result.category).toBe("B. AUTOMATION / TEST IMPLEMENTATION ISSUE");
+    expect(result.bugEligible).toBe(false);
+  });
+
+  test("a removed element is surfaced for human review rather than lost", () => {
+    const result = classifyFailure({ message: REMOVED_ELEMENT_VISIBLE, reporterStatus: "failed" });
+    // It is B (we cannot prove a contract mismatch), but the "possible real
+    // application change" must remain visible so a human can promote it.
+    expect(result.rationale).toContain("HUMAN_REVIEW_REQUIRED");
+    expect(result.rationale).toContain("possible real application change");
+  });
+
+  test("toHaveURL mismatch stays A", () => {
+    const result = classifyFailure({ message: URL_MISMATCH, reporterStatus: "failed" });
+    expect(result.category).toBe("A. REAL APPLICATION DEFECT");
+    expect(result.bugEligible).toBe(true);
+  });
+
+  test("toHaveText mismatch stays A", () => {
+    const result = classifyFailure({ message: TEXT_MISMATCH, reporterStatus: "failed" });
+    expect(result.category).toBe("A. REAL APPLICATION DEFECT");
+    expect(result.bugEligible).toBe(true);
+  });
+
+  test("the same three cases separate correctly in one batch", () => {
+    const categories = [REMOVED_ELEMENT_VISIBLE, URL_MISMATCH, TEXT_MISMATCH].map((message) => classifyFailure({ message, reporterStatus: "failed" }).category.slice(0, 1));
+    expect(categories).toEqual(["B", "A", "A"]);
   });
 });
 

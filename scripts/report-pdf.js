@@ -38,9 +38,18 @@ function main() {
   const output = path.resolve(process.argv[3] || "qa-report.pdf");
   const report = JSON.parse(fs.readFileSync(path.resolve(input), "utf8"));
   const sections = report.sections || {};
+  const humanReview = sections.humanReview || { count: 0, distinctTests: 0, items: [] };
   const lines = [
     "FINAL QA REPORT",
     `Run summary: ${report.runId} | ${report.status} | ${report.environment}`,
+    // Placed immediately after the run summary, before the large JSON blocks:
+    // the PDF text is truncated at 5000 characters, so anything later would be
+    // cut off and these cases would be invisible in the PDF.
+    `NEEDS HUMAN REVIEW: ${humanReview.count} signal(s) across ${humanReview.distinctTests} test(s) (not auto-filed; possible real application defects)`,
+    ...(humanReview.items || []).map(
+      (item, index) =>
+        `  ${index + 1}. [${item.source}] ${item.test || item.category || "run"} - ${item.reason}`,
+    ),
     `URL: ${report.url || "Not available / not applicable."}`,
     `Module: ${report.module || "Not available / not applicable."} | Scope: ${report.scope || "Not available / not applicable."}`,
     "Requirement coverage",
