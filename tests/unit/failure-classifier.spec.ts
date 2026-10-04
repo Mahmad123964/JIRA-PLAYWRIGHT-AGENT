@@ -1,6 +1,4 @@
 import { test, expect } from "@playwright/test";
-import fs from "fs";
-import path from "path";
 import { classifyFailure, messageHead, reporterBody } from "../../src/failure-classifier";
 
 /**
@@ -51,6 +49,22 @@ const UNRECOGNIZED = "Something entirely unexpected happened during fixture tear
 // Real Playwright 1.62 rendering when the element is gone from the page. The
 // Received value is Playwright's literal placeholder, and an expected/received
 // diff IS present -- so only the placeholder identifies this as unresolved.
+// Verbatim failure payload from a real approved-run execution.
+const STORED_INTEGRATION_DEFECT_ERROR =
+  'Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n' +
+  '\nLocator: getByRole(\'heading\', { name: \'Welcome back\' })\nExpected substring: \u001b[32m"W\u001b[7mrong heading\u001b[27m"\u001b[39m\n' +
+  'Received string:    \u001b[31m"W\u001b[7melcome back\u001b[27m"\u001b[39m\nTimeout: 5000ms\n\nCall log:\n' +
+  '\u001b[2m  - Expect "toContainText" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByRole(\'heading\', { name: \'Welcome back\' })\u001b[22m\n' +
+  '\u001b[2m    13 × locator resolved to <h1>Welcome back</h1>\u001b[22m\n\u001b[2m       - unexpected value "Welcome back"\u001b[22m\n' +
+  '\n\n\u001b[0m \u001b[90m 20 |\u001b[39m       \u001b[36mif\u001b[39m (\u001b[36mawait\u001b[39m target\u001b[33m.\u001b[39mcount() \u001b[33m===\u001b[39m \u001b[35m0\u001b[39m) \u001b[36mthrow\u001b[39m \u001b[36mnew\u001b[39m \u001b[33mError\u001b[39m(\u001b[32m"LOCATOR_NOT_FOUND"\u001b[39m)\u001b[33m;\u001b[39m\n' +
+  ' \u001b[90m 21 |\u001b[39m       \n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 22 |\u001b[39m       \u001b[36mawait\u001b[39m expect(target)\u001b[33m.\u001b[39mtoContainText(\u001b[32m"Wrong heading"\u001b[39m)\u001b[33m;\u001b[39m } \u001b[36mcatch\u001b[39m (error) {\n' +
+  ' \u001b[90m    |\u001b[39m                            \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 23 |\u001b[39m         \u001b[36mconst\u001b[39m message \u001b[33m=\u001b[39m error \u001b[36minstanceof\u001b[39m \u001b[33mError\u001b[39m \u001b[33m?\u001b[39m error\u001b[33m.\u001b[39mmessage \u001b[33m:\u001b[39m \u001b[33mString\u001b[39m(error)\u001b[33m;\u001b[39m\n' +
+  ' \u001b[90m 24 |\u001b[39m         \u001b[36mif\u001b[39m (\u001b[33m!\u001b[39m\u001b[35m/locator|strict mode|no element|not found|resolved to 0/i\u001b[39m\u001b[33m.\u001b[39mtest(message)) \u001b[36mthrow\u001b[39m error\u001b[33m;\u001b[39m\n' +
+  ' \u001b[90m 25 |\u001b[39m         \u001b[36mconst\u001b[39m healing \u001b[33m=\u001b[39m \u001b[36mawait\u001b[39m healOnSamePage({ page\u001b[33m,\u001b[39m originalLocator\u001b[33m:\u001b[39m \u001b[32m"getByRole(\'heading\', { name: \'Welcome back\' })"\u001b[39m\u001b[33m,\u001b[39m originalRole\u001b[33m:\u001b[39m \u001b[32m"heading"\u001b[39m\u001b[33m,\u001b[39m originalName\u001b[33m:\u001b[39m \u001b[32m"Welcome back"\u001b[39m\u001b[33m,\u001b[39m expectedText\u001b[33m:\u001b[39m \u001b[32m"Wrong heading"\u001b[39m\u001b[33m,\u001b[39m failureKind\u001b[33m:\u001b[39m \u001b[35m/resolved to 0|no element|not found/i\u001b[39m\u001b[33m.\u001b[39mtest(message) \u001b[33m?\u001b[39m \u001b[32m"LOCATOR_NOT_FOUND"\u001b[39m \u001b[33m:\u001b[39m \u001b[32m"LOCATOR_EMPTY"\u001b[39m\u001b[33m,\u001b[39m elements\u001b[33m:\u001b[39m observedElements\u001b[33m,\u001b[39m rerun\u001b[33m:\u001b[39m \u001b[36masync\u001b[39m (candidate) \u001b[33m=>\u001b[39m { \u001b[36mconst\u001b[39m healed \u001b[33m=\u001b[39m locatorForObservedElement(page\u001b[33m,\u001b[39m candidate)\u001b[33m;\u001b[39m \u001b[36mtry\u001b[39m {  \u001b[36mawait\u001b[39m expect(healed)\u001b[33m.\u001b[39mtoContainText(\u001b[32m"Wrong heading"\u001b[39m)\u001b[33m;\u001b[39m \u001b[36mreturn\u001b[39m { action\u001b[33m:\u001b[39m \u001b[32m"PASS"\u001b[39m\u001b[33m,\u001b[39m assertion\u001b[33m:\u001b[39m \u001b[32m"PASS"\u001b[39m }\u001b[33m;\u001b[39m } \u001b[36mcatch\u001b[39m (rerunError) { \u001b[36mreturn\u001b[39m { action\u001b[33m:\u001b[39m \u001b[32m"PASS"\u001b[39m\u001b[33m,\u001b[39m assertion\u001b[33m:\u001b[39m \u001b[32m"FAIL"\u001b[39m\u001b[33m,\u001b[39m detail\u001b[33m:\u001b[39m \u001b[33mString\u001b[39m(rerunError) }\u001b[33m;\u001b[39m } }} )\u001b[0m\n' +
+  '\u001b[2m    at C:\\Users\\haali\\Videos\\New\\JIRA-PLAYWRIGHT-AGENT\\tests\\generated\\DemoDefect\\TC-DEMO-A.spec.ts:22:28\u001b[22m\n' +
+  '\u001b[2m    at C:\\Users\\haali\\Videos\\New\\JIRA-PLAYWRIGHT-AGENT\\tests\\generated\\DemoDefect\\TC-DEMO-A.spec.ts:18:5\u001b[22m (at C:\\Users\\haali\\Videos\\New\\JIRA-PLAYWRIGHT-AGENT\\tests\\generated\\DemoDefect\\TC-DEMO-A.spec.ts:22:28)';
+
+
 const REMOVED_ELEMENT_VISIBLE = `Error: expect(locator).toBeVisible() failed
 
 Locator:  getByRole('button', { name: 'Old Removed action' })
@@ -270,15 +284,28 @@ test.describe("payload scoping helpers", () => {
   });
 });
 
-test.describe("stored run artifacts", () => {
-  const reportPath = path.resolve("reports/integration-defect/approved-run-result.json");
-  test.skip(!fs.existsSync(reportPath), "requires reports/integration-defect from a previous integration run");
-
-  test("the stored integration-defect failure is still category A and Jira-eligible", () => {
-    const stored = JSON.parse(fs.readFileSync(reportPath, "utf8"));
-    const failing = stored.execution.tests.find((item: { status: string }) => item.status === "FAIL");
-    const result = classifyFailure({ message: failing.error, reporterStatus: "failed" });
+test.describe("real captured payload", () => {
+  test("the real integration-defect failure is category A and Jira-eligible", () => {
+    // Captured verbatim from a real run of tests/integration/approved-run-healing.spec.ts
+    // ("run-approved routes a real assertion failure to Jira dry-run defect output").
+    // Embedded here rather than read from reports/ so this guard runs in a fresh
+    // clone, where reports/ is gitignored and absent. ANSI colour codes and the
+    // spec code frame are preserved on purpose: the frame quotes the generated
+    // healing regex containing "no element", "not found" and "resolved to 0",
+    // which must not be mistaken for this run's failure reason.
+    const result = classifyFailure({ message: STORED_INTEGRATION_DEFECT_ERROR, reporterStatus: "failed" });
     expect(result.category).toBe("A. REAL APPLICATION DEFECT");
     expect(result.bugEligible).toBe(true);
+    expect(result.retryAllowed).toBe(false);
+  });
+
+  test("the embedded payload still contains the traps it is meant to guard", () => {
+    // Guards the guard: if this payload is ever trimmed, the test above could
+    // pass for the wrong reason.
+    expect(STORED_INTEGRATION_DEFECT_ERROR).toContain("Expected substring:");
+    expect(STORED_INTEGRATION_DEFECT_ERROR).toContain("Received string:");
+    expect(STORED_INTEGRATION_DEFECT_ERROR).toContain("\u001b[");   // ANSI preserved
+    expect(STORED_INTEGRATION_DEFECT_ERROR).toContain("no element"); // spec source trap
+    expect(STORED_INTEGRATION_DEFECT_ERROR).toContain("resolved to 0"); // spec source trap
   });
 });

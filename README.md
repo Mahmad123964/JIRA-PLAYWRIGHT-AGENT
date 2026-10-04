@@ -26,14 +26,26 @@ npx playwright install chromium
 
 Run from the repository root.
 
-> **Command syntax note.** On npm 11 / Windows, `npm run <script> -- --flag value` **drops the `--flag` tokens** before the script sees them; only the values arrive. This was measured directly, with and without the `--` separator. Scripts that take flags must therefore be invoked through `node`:
+> **Command syntax note — Windows PowerShell only.** In Windows PowerShell 5.1 the bare command `npm` resolves to the **`npm.ps1` shim** (`ExternalScript` outranks `Application` in command precedence). That shim re-quotes its arguments before calling `npm-cli.js`, and in doing so it destroys the `--` separator, so npm then parses your `--flag` tokens as **its own** config and drops them. Measured with an argv echo script:
+>
+> | Invocation | ARGV received by the script |
+> | --- | --- |
+> | `npm run x -- --url X --module Y` (PowerShell → `npm.ps1`) | `["X","Y"]` — **flags lost** |
+> | `npm.cmd run x -- --url X --module Y` | `["--url","X","--module","Y"]` ✅ |
+> | `cmd /c "npm run x -- --url X --module Y"` | `["--url","X","--module","Y"]` ✅ |
+> | `npm run x '--' --url X --module Y` | `["--url","X","--module","Y"]` ✅ |
+>
+> This is **not** an npm bug and **not** a general PowerShell parsing limitation — `npm.cmd` from the same shell works fine, and quoting the separator as a literal `'--'` string also works. Without the separator both wrappers behave identically (npm treats `--url` as config), which is expected npm behaviour.
+>
+> The simplest shell-independent form is to call `node` directly, and that is what this README uses:
 >
 > ```powershell
-> node scripts/explore.js --url "<url>" ...     # correct
-> npm run explore -- --url "<url>" ...         # BROKEN: --url is consumed by npm
+> node scripts/explore.js --url "<url>" ...     # always works
 > ```
 >
-> `npm run <script>` still works for scripts that take no flags (`typecheck`, `lint`, `demo-site`).
+> Working `npm` alternatives in PowerShell: `npm.cmd run <script> -- --flag value`, or `npm run <script> '--' --flag value`.
+>
+> `npm run <script>` works unchanged for scripts that take no flags (`typecheck`, `lint`, `demo-site`).
 
 ```powershell
 node scripts/explore.js --url "<url>" --module "<module>" --scope "<scope>" --requirement "<requirement>" --output "exploration.json"
@@ -77,13 +89,13 @@ Serve the local fixture site; run TypeScript validation; run the targeted forbid
 ## 4. Test suites
 
 ```powershell
-npx playwright test tests/unit          # 178 collected: 177 passed, 1 skipped
+npx playwright test tests/unit          # 178 passed, 0 skipped
 npx playwright test tests/integration   #  10 passed
 ```
 
-The single skipped unit test asserts against the stored `reports/integration-defect` artifact, so it self-skips in a fresh clone until an integration run has produced that file. It passes once the artifact exists.
+The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 9 final-report tests and 4 CLI-argument tests.
 
-The **unit** suite is pure and fast; it includes 16 JSON-reporter parser tests, 28 failure-classifier tests, 9 final-report tests and 4 CLI-argument tests.
+The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 9 final-report tests and 4 CLI-argument tests.
 
 The **integration** suite drives real Playwright runs and the local fixture server:
 
