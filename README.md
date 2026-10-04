@@ -89,11 +89,9 @@ Serve the local fixture site; run TypeScript validation; run the targeted forbid
 ## 4. Test suites
 
 ```powershell
-npx playwright test tests/unit          # 178 passed, 0 skipped
+npx playwright test tests/unit          # 179 passed, 0 skipped
 npx playwright test tests/integration   #  10 passed
 ```
-
-The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 9 final-report tests and 4 CLI-argument tests.
 
 The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 9 final-report tests and 4 CLI-argument tests.
 
