@@ -24,19 +24,16 @@ test("default artifact capture executes a real spec instead of failing on CLI fl
   // The runner must have started and completed successfully.
   expect(result.exitCode).toBe(0);
 
-  // Results must come from a real JSON reporter payload, NOT the single-test
-  // fallback path that executePlaywright synthesises when stdout is not JSON.
-  // Without this an exit-code-0 run that produced no output would still pass.
-  expect(result.tests[0].stdout).toContain('"suites"');
-  expect(result.tests[0].stdout).toContain('"expected": 1');
-
-  // The reporter recorded a real passing test. Asserted against the raw
-  // payload on purpose: in Playwright 1.62 the per-attempt outcome moved to
-  // tests[].results[].status while tests[].status is now "expected"/"unexpected",
-  // so parseJsonReporter currently mis-maps this to FAIL. That is a separate
-  // defect (see TODO in src/execution-engine.ts) and is deliberately NOT
-  // asserted through here -- this test guards the CLI-flag regression only.
-  expect(result.tests[0].stdout).toContain('"status": "passed"');
+  // Results must come from a real JSON reporter payload, NOT the exit-code
+  // fallback. Grepping stdout proves nothing about how stdout was parsed --
+  // the raw payload is present either way -- so attribution is asserted on the
+  // parsed result itself: a real spec title, the reporter as the source, and
+  // the test's own duration rather than wall-clock.
+  expect(result.tests[0].source).toBe("playwright-json");
+  expect(result.tests[0].title).toBe("artifact capture self check");
+  expect(result.tests[0].status).toBe("PASS");
+  expect(result.tests[0].durationMs).toBeGreaterThan(0);
+  expect(result.totals).toMatchObject({ total: 1, passed: 1, failed: 0 });
 });
 
 test("captureArtifacts false also executes cleanly", async () => {
@@ -47,5 +44,6 @@ test("captureArtifacts false also executes cleanly", async () => {
 
   expect(result.command).not.toContain("--trace");
   expect(result.exitCode).toBe(0);
-  expect(result.tests[0].stdout).toContain('"status": "passed"');
+  expect(result.tests[0].source).toBe("playwright-json");
+  expect(result.tests[0].status).toBe("PASS");
 });
