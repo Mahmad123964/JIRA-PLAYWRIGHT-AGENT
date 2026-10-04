@@ -58,7 +58,7 @@ function main() {
     // anything later would be cut off and these cases would be invisible.
     suiteLine("Smoke suite", smoke),
     suiteLine("Regression suite", regression),
-    `NEEDS HUMAN REVIEW: ${humanReview.count} signal(s) across ${humanReview.distinctTests} test(s) (not auto-filed; possible real application defects)`,
+    `NEEDS HUMAN REVIEW: ${humanReview.count} finding(s) across ${humanReview.distinctTests} failing test(s) (not auto-filed; possible real application defects)`,
     ...(humanReview.items || []).map(
       (item, index) =>
         `  ${index + 1}. [${item.source}] ${item.test || item.category || "run"} - ${item.reason}`,

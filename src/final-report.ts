@@ -21,10 +21,20 @@ const HUMAN_REVIEW_MARKERS = /HUMAN_REVIEW_REQUIRED|possible real application ch
 
 export function collectHumanReview(runResult: Record<string, unknown>, failures: unknown[]): HumanReviewSection {
   const items: HumanReviewItem[] = [];
+  const failingTests = (Array.isArray(failures) ? failures : []).map((failure) => String((failure as { path?: string }).path || (failure as { title?: string }).title || "")).filter(Boolean);
   for (const entry of (Array.isArray(runResult.healing) ? runResult.healing : []) as Array<{ outcome?: string; reason?: string }>) {
     const reason = String(entry?.reason || "");
     if (entry?.outcome === "NOT_HEALED" || HUMAN_REVIEW_MARKERS.test(reason)) {
-      items.push({ source: "healing", reason, possibleRealDefect: true });
+      items.push({
+        source: "healing",
+        // ValidatedHealingResult carries no spec path. When the run had exactly one
+        // failing test the attribution is unambiguous and is recorded; otherwise
+        // the finding is genuinely run-level and must not claim a test, rather
+        // than silently reporting "0 tests".
+        test: failingTests.length === 1 ? failingTests[0] : undefined,
+        reason,
+        possibleRealDefect: true,
+      });
     }
   }
   for (const failure of failures) {
@@ -40,13 +50,21 @@ export function collectHumanReview(runResult: Record<string, unknown>, failures:
       });
     }
   }
-  // One removed element produces two corroborating signals: the healing entry
-  // (NOT_HEALED) and the B classification. They are listed separately because
-  // they come from different layers, so `count` is the number of SIGNALS while
-  // `distinctTests` is the number of affected tests. ValidatedHealingResult
-  // carries no test path, so the signals cannot be reliably merged.
+  // One removed element produces two corroborating findings: the healing entry
+  // (NOT_HEALED) and the B classification. They come from different layers and
+  // are listed separately, so `count` is the number of findings while
+  // `distinctTests` is the number of affected failing tests.
   const distinctTests = new Set(items.map((item) => item.test).filter(Boolean)).size;
   return { count: items.length, distinctTests, items };
+}
+
+/** Grammatical, unambiguous rendering of the human-review counts. */
+export function humanReviewLabel(section: HumanReviewSection | undefined): string {
+  if (!section || section.count === 0) return "NEEDS HUMAN REVIEW: none";
+  const findings = section.count === 1 ? "1 finding" : `${section.count} findings`;
+  if (section.distinctTests === 0) return `NEEDS HUMAN REVIEW: ${findings} (run-level; no single failing test could be attributed)`;
+  const tests = section.distinctTests === 1 ? "1 failing test" : `${section.distinctTests} failing tests`;
+  return `NEEDS HUMAN REVIEW: ${findings} across ${tests}`;
 }
 
 function evidenceFor(pathValue: string, kind: string): FinalEvidence { const checked = verifyArtifact(pathValue); return { kind, status: checked.status === "AVAILABLE" ? "AVAILABLE" : "MISSING", path: checked.path }; }
@@ -170,4 +188,4 @@ export function aggregateFinalReport(runId: string, runResult: Record<string, un
   };
 }
 export function saveFinalReport(report: FinalReport, outputPath = path.resolve("reports", report.runId, "final-report.json")): string { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); const sanitized = sanitizeSecrets(JSON.stringify(report, null, 2)).sanitized; fs.writeFileSync(outputPath, sanitized, "utf8"); return outputPath; }
-export function finalReportText(report: FinalReport): string { const execution = report.sections.execution as { totals?: unknown } | undefined; const humanReview = report.sections.humanReview as HumanReviewSection | undefined; return ["FINAL QA REPORT", `Run ID: ${report.runId}`, `Status: ${report.status}`, `Environment: ${report.environment}`, `URL: ${report.url || "Not available / not applicable."}`, `Module: ${report.module || "Not available / not applicable."}`, `Scope: ${report.scope || "Not available / not applicable."}`, `Execution: ${JSON.stringify(execution?.totals || {})}`, `Healing entries: ${Array.isArray(report.sections.healing) ? report.sections.healing.length : 0}`, ...describeSuiteSection(report.sections.smoke as SuiteSection | null, "Smoke suite"), ...describeSuiteSection(report.sections.regression as SuiteSection | null, "Regression suite"), `NEEDS HUMAN REVIEW: ${humanReview?.count ?? 0} signal(s) across ${humanReview?.distinctTests ?? 0} test(s)`, ...(humanReview?.items || []).map((item, index) => `  ${index + 1}. [${item.source}] ${item.test || item.category || "run"} - ${item.reason}`), `Evidence artifacts: ${report.evidence.length}`, `Security: ${report.security.status}`].join("\n"); }
+export function finalReportText(report: FinalReport): string { const execution = report.sections.execution as { totals?: unknown } | undefined; const humanReview = report.sections.humanReview as HumanReviewSection | undefined; return ["FINAL QA REPORT", `Run ID: ${report.runId}`, `Status: ${report.status}`, `Environment: ${report.environment}`, `URL: ${report.url || "Not available / not applicable."}`, `Module: ${report.module || "Not available / not applicable."}`, `Scope: ${report.scope || "Not available / not applicable."}`, `Execution: ${JSON.stringify(execution?.totals || {})}`, `Healing entries: ${Array.isArray(report.sections.healing) ? report.sections.healing.length : 0}`, ...describeSuiteSection(report.sections.smoke as SuiteSection | null, "Smoke suite"), ...describeSuiteSection(report.sections.regression as SuiteSection | null, "Regression suite"), humanReviewLabel(humanReview), ...(humanReview?.items || []).map((item, index) => `  ${index + 1}. [${item.source}] ${item.test || item.category || "run"} - ${item.reason}`), `Evidence artifacts: ${report.evidence.length}`, `Security: ${report.security.status}`].join("\n"); }

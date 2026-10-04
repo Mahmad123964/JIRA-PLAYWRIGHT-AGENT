@@ -59,7 +59,7 @@ async function runSmoke(argv) {
   const runId = flag(argv, "--run-id") || `smoke-${Date.now()}`;
   const config = loadSmokeConfig(REPO_ROOT);
   if (!config.configured) {
-    const payload = { suite: "smoke", outcome: "SKIPPED_NOT_CONFIGURED", status: "SKIPPED_NOT_CONFIGURED", configured: false, configPath: config.configPath, paths: [], missing: config.missing, reason: config.reason, totals: { total: 0, passed: 0, failed: 0, blocked: 0, skipped: 0 }, executed: false };
+    const payload = { suite: "smoke", profile: config.profile, outcome: "SKIPPED_NOT_CONFIGURED", status: "SKIPPED_NOT_CONFIGURED", configured: false, configPath: config.configPath, paths: [], missing: config.missing, reason: config.reason, totals: { total: 0, passed: 0, failed: 0, blocked: 0, skipped: 0 }, executed: false };
     const reportPath = writeReport(runId, "smoke", payload);
     return { payload, reportPath, exitCode: 0 };
   }
@@ -67,6 +67,7 @@ async function runSmoke(argv) {
   const outcome = suiteOutcomeFor(result.totals);
   const payload = {
     suite: "smoke",
+    profile: config.profile,
     outcome,
     status: outcome,
     configured: true,
@@ -147,7 +148,7 @@ async function main() {
   // Mode is explicit: --smoke selects smoke, anything else selects regression.
   const mode = argv.includes("--smoke") ? "smoke" : process.env.QA_SUITE === "smoke" ? "smoke" : "regression";
   const { payload, reportPath, exitCode } = mode === "smoke" ? await runSmoke(argv) : await runRegression(argv);
-  console.log(JSON.stringify({ suite: mode, outcome: payload.outcome, configured: payload.configured, reason: payload.reason, included: payload.included, totals: payload.totals, selectionPath: payload.selectionPath, reportPath }, null, 2));
+  console.log(JSON.stringify({ suite: mode, profile: payload.profile, outcome: payload.outcome, configured: payload.configured, reason: payload.reason, included: payload.included, totals: payload.totals, selectionPath: payload.selectionPath, reportPath }, null, 2));
   process.exitCode = exitCode;
 }
 

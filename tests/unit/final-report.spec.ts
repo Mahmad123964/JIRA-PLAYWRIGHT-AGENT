@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import fs from "fs";
 import path from "path";
-import { aggregateFinalReport, saveFinalReport, finalReportText, collectHumanReview } from "../../src/final-report";
+import { aggregateFinalReport, saveFinalReport, finalReportText, collectHumanReview, humanReviewLabel } from "../../src/final-report";
 
 const REMOVED_RATIONALE = "The locator did not resolve to the intended element, so the test never reached the assertion and no contract mismatch can be proven. A removed or renamed element is a possible real application change: validated-healing flags it as HUMAN_REVIEW_REQUIRED for a human to judge, and it is not auto-filed as a defect.";
 
@@ -78,10 +78,32 @@ test("a clean run reports zero human-review cases", () => {
 
 test("final report text states the human-review count and lists each case", () => {
     const text = finalReportText(aggregateFinalReport("removed-element", removedElementRun()));
-    expect(text).toContain("NEEDS HUMAN REVIEW: 2 signal(s) across 1 test(s)");
+    // Grammatical label with an explicit failing-test count.
+    expect(text).toContain("NEEDS HUMAN REVIEW: 2 findings across 1 failing test");
     expect(text).toContain("[healing]");
     expect(text).toContain("[failure-classification]");
     expect(text).toContain("TC-DEMO-REMOVED.spec.ts");
+});
+
+test("the human-review label is grammatical and never claims zero tests silently", () => {
+    // A run-level finding (no attributable test) must say so explicitly rather
+    // than reporting "across 0 tests", which read as "nothing was affected".
+    const runLevel = collectHumanReview({ healing: [{ outcome: "NOT_HEALED", reason: "HUMAN_REVIEW_REQUIRED" }] }, []);
+    expect(runLevel.count).toBe(1);
+    expect(runLevel.distinctTests).toBe(0);
+    expect(humanReviewLabel(runLevel)).toBe("NEEDS HUMAN REVIEW: 1 finding (run-level; no single failing test could be attributed)");
+
+    expect(humanReviewLabel(undefined)).toBe("NEEDS HUMAN REVIEW: none");
+    expect(humanReviewLabel({ count: 0, distinctTests: 0, items: [] })).toBe("NEEDS HUMAN REVIEW: none");
+});
+
+test("a single failing test is attributed to the healing finding", () => {
+    const section = collectHumanReview({ healing: [{ outcome: "NOT_HEALED", reason: "HUMAN_REVIEW_REQUIRED" }] }, [
+      { path: "generated/DemoRemoved/TC-DEMO-REMOVED.spec.ts", diagnosis: { category: "B. AUTOMATION / TEST IMPLEMENTATION ISSUE", rationale: "possible real application change" } },
+    ]);
+    expect(section.items[0].test).toBe("generated/DemoRemoved/TC-DEMO-REMOVED.spec.ts");
+    expect(section.distinctTests).toBe(1);
+    expect(humanReviewLabel(section)).toContain("across 1 failing test");
 });
 
 test("an unclassified failure is flagged for human review rather than lost", () => {

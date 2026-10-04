@@ -20,6 +20,12 @@ export type SuiteOutcome = "SUCCESS" | "PARTIAL" | "FAILED" | "BLOCKED" | "SKIPP
 export interface SmokeConfig {
   /** Absolute path to the config file that was read, if any. */
   configPath: string;
+  /**
+   * Declared profile name, carried into the report so a reader can see WHAT was
+   * checked. The only profile shipped today is "preflight", which proves
+   * environment and runner sanity and asserts nothing about the product.
+   */
+  profile: string;
   /** True only when a config file was read AND it declared at least one test. */
   configured: boolean;
   /** Repo-relative, forward-slash paths that exist on disk. */
@@ -43,7 +49,7 @@ function isNonEmptyString(value: unknown): value is string {
 export function loadSmokeConfig(root: string = process.cwd()): SmokeConfig {
   const configPath = path.resolve(root, SMOKE_CONFIG_FILENAME);
   if (!fs.existsSync(configPath)) {
-    return { configPath, configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} was not found; no smoke flows were invented` };
+    return { configPath, profile: "unknown", configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} was not found; no smoke flows were invented` };
   }
 
 let parsed: unknown;
@@ -53,20 +59,20 @@ let parsed: unknown;
     const raw = fs.readFileSync(configPath, "utf8").replace(/^\uFEFF/, "");
     parsed = JSON.parse(raw);
   } catch (error) {
-    return { configPath, configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} is not valid JSON: ${(error as Error).message}` };
+    return { configPath, profile: "unknown", configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} is not valid JSON: ${(error as Error).message}` };
   }
 
   const declared = (parsed as { smoke?: { tests?: unknown } } | null)?.smoke?.tests;
   if (!Array.isArray(declared)) {
-    return { configPath, configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} has no "smoke.tests" array; no smoke flows were invented` };
+    return { configPath, profile: "unknown", configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} has no "smoke.tests" array; no smoke flows were invented` };
   }
 
   const wanted = declared.filter(isNonEmptyString).map((item) => item.trim());
   if (!wanted.length) {
-    return { configPath, configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} declares an empty smoke.tests list; nothing to run and no flow was invented` };
+    return { configPath, profile: "unknown", configured: false, paths: [], missing: [], reason: `${SMOKE_CONFIG_FILENAME} declares an empty smoke.tests list; nothing to run and no flow was invented` };
   }
 
-  const present: string[] = [];
+const present: string[] = [];
   const missing: string[] = [];
   for (const item of wanted) {
     if (fs.existsSync(path.resolve(root, item))) present.push(path.relative(root, path.resolve(root, item)).replace(/\\/g, "/"));
@@ -74,10 +80,12 @@ let parsed: unknown;
   }
 
   if (!present.length) {
-    return { configPath, configured: false, paths: [], missing, reason: `every smoke test declared in ${SMOKE_CONFIG_FILENAME} is missing from disk: ${missing.join(", ")}` };
+    return { configPath, profile: "unknown", configured: false, paths: [], missing, reason: `every smoke test declared in ${SMOKE_CONFIG_FILENAME} is missing from disk: ${missing.join(", ")}` };
   }
 
-  return { configPath, configured: true, paths: [...new Set(present)].sort(), missing };
+  const declaredProfile = (parsed as { smoke?: { profile?: unknown } })?.smoke?.profile;
+  const profile = isNonEmptyString(declaredProfile) ? declaredProfile.trim() : "unnamed";
+  return { configPath, profile, configured: true, paths: [...new Set(present)].sort(), missing };
 }
 
 /**

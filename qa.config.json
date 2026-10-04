@@ -1,7 +1,11 @@
 {
   "smoke": {
+    "profile": "preflight",
     "tests": [
-      "tests/smoke/preflight.spec.ts"
+      "tests/preflight/environment.spec.ts"
     ]
+  },
+  "profiles": {
+    "_comment": "Each entry is an explicitly declared smoke profile. 'preflight' only checks environment and runner sanity and asserts nothing about the product. Add real product flows as their own profile, for example: \"auth\": { \"tests\": [\"tests/smoke/auth/login.spec.ts\"] }. Flows are never inferred or invented."
   }
 }
