@@ -1,0 +1,7 @@
+{
+  "smoke": {
+    "tests": [
+      "tests/smoke/preflight.spec.ts"
+    ]
+  }
+}
