@@ -101,7 +101,7 @@ Serve the local fixture site; run TypeScript validation; run the targeted forbid
 ## 4. Test suites
 
 ```powershell
-npx playwright test tests/unit          # 191 passed, 0 skipped
+npx playwright test tests/unit          # 192 passed, 0 failed, 0 skipped
 npx playwright test tests/integration   #  14 passed
 ```
 
