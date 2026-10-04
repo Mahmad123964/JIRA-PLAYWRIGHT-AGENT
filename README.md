@@ -1,43 +1,69 @@
 # Generic Playwright QA Automation Agent
+
 A requirements-driven Playwright QA agent with a human approval gate; Jira is optional.
 
-> **Current verified status:** The Phases 1–5 status below is authoritative. Project History is historical context, not a claim of current end-to-end behavior.
+> **Current verified status:** the status table in section 3 is authoritative. "Project History" near the end is historical context, not a claim of current behavior.
 
 ## 1. What this agent does
-The agent explores a supplied website, generates test cases from requirements and observed UI, waits for human approval, generates TypeScript Page Objects and Playwright specs for eligible ready cases, executes them, validates eligible locator repairs on the same page, classifies failures, and produces JSON and PDF reports. The optional Jira defect path is dry-run by default. The initial `qa` command stops at approval; use the separate commands below to continue.
 
-## 2. How to run it
-Install dependencies with `npm install` and the browser with `npx playwright install chromium`. Run commands from the repository root; use `--` before script arguments.
+The agent explores a supplied website, generates test cases from requirements and observed UI, waits for human approval, generates TypeScript Page Objects and Playwright specs for eligible ready cases, executes them, parses **real per-test results** out of Playwright's JSON reporter, classifies failures, optionally validates locator repairs on the same page, and produces JSON and PDF reports. The optional Jira defect path is dry-run by default. The `qa` command stops at the approval gate; use the separate commands below to continue.
+
+## 2. Requirements and pinned versions
+
+```text
+Node.js   >= 22
+Playwright 1.62.1  (pinned exactly — no ^ or ~)
+```
 
 ```powershell
-npm run explore --url "<url>" --module "<module>" --scope "<scope>" --requirement "<requirement>" --output "exploration.json"
+npm ci
+npx playwright install chromium
+```
+
+**Why Playwright is pinned exactly.** `src/execution-engine.ts` (JSON reporter parsing) and `src/failure-classifier.ts` (message-text classification) both depend on the **Playwright 1.62** reporter schema and error-message wording. 1.62 moved the per-test outcome, duration and errors into `test.results[last]`, made `test.status` an expectation resolution, and renders a missing element as the literal placeholder `<element(s) not found>`. Both modules are verified against **1.62.1** only. A minor or major bump may silently break parsing or classification, so treat an upgrade as a code change and re-run the full suites.
+
+## 3. How to run it
+
+Run from the repository root.
+
+> **Command syntax note.** On npm 11 / Windows, `npm run <script> -- --flag value` **drops the `--flag` tokens** before the script sees them; only the values arrive. This was measured directly, with and without the `--` separator. Scripts that take flags must therefore be invoked through `node`:
+>
+> ```powershell
+> node scripts/explore.js --url "<url>" ...     # correct
+> npm run explore -- --url "<url>" ...         # BROKEN: --url is consumed by npm
+> ```
+>
+> `npm run <script>` still works for scripts that take no flags (`typecheck`, `lint`, `demo-site`).
+
+```powershell
+node scripts/explore.js --url "<url>" --module "<module>" --scope "<scope>" --requirement "<requirement>" --output "exploration.json"
 ```
 Explore the site and save observed pages, controls, locator candidates and provenance.
 
 ```powershell
-npm run generate-tests --exploration "exploration.json" --output "generated.json"
-npm run generate-tests --exploration "exploration.json" --requirement "<requirement>" --human-outcome "<requirement>|text|<human-supplied exact text>" --output "generated.json"
+node scripts/generate-tests.js --exploration "exploration.json" --output "generated.json"
+node scripts/generate-tests.js --exploration "exploration.json" --requirement "<requirement>" --human-outcome "<requirement>|text|<human-supplied exact text>" --output "generated.json"
 ```
 Generate `PENDING_APPROVAL` cases and print flagged steps. Human outcome syntax is `<requirement>|visible|<value>`, `<requirement>|text|<value>` or `<requirement>|url|<value>`; the generator does not infer the value. The output includes the approval store ID.
 
 ```powershell
-npm run approve-tests -- approve --store "<store-id>" --id "<test-case-id>" --reviewer "human" --comment "Reviewed"
-npm run approve-tests -- ready --store "<store-id>"
+node scripts/approve-tests.js approve --store "<store-id>" --id "<test-case-id>" --reviewer "human" --comment "Reviewed"
+node scripts/approve-tests.js ready --store "<store-id>"
 ```
 Human review is required. Only approved cases can become `READY_FOR_AUTOMATION`; editing invalidates approval and returns a case to `PENDING_APPROVAL`.
 
 ```powershell
-npm run-approved --store "<store-id>" --run-id "<run-id>"
+node scripts/run-approved.js --store "<store-id>" --run-id "<run-id>"
 ```
 Generate and execute eligible ready cases; record classified failures, evidence and eligible healing in `reports/<run-id>/approved-run-result.json`. Cases missing evidence or assertions remain blocked.
 
 ```powershell
-npm run report-final --run-id "<run-id>"
+node scripts/report-final.js --run-id "<run-id>"
 ```
 Aggregate the approved-run output into `reports/<run-id>/final-report.json` and `reports/<run-id>/qa-report.pdf`.
 
 ```powershell
-npm run defect-dry-run --run-id "<run-id>" --test-case "<test-case-id>"
+node scripts/defect-dry-run.js --run-id "<run-id>" --test-case "<test-case-id>"
 ```
 Write a dry-run defect plan without creating a Jira issue. The separate `run-approved` path also routes eligible category-A failures to a dry-run result.
 
@@ -48,7 +74,83 @@ npm run lint
 ```
 Serve the local fixture site; run TypeScript validation; run the targeted forbidden-pattern check. The fixture's scripted approval helper is demo-only, not a production approval path.
 
-## 3. Status table
+## 4. Test suites
+
+```powershell
+npx playwright test tests/unit          # 178 passed
+npx playwright test tests/integration   #  10 passed
+```
+
+The **unit** suite is pure and fast; it includes 16 JSON-reporter parser tests, 28 failure-classifier tests, 9 final-report tests and 4 CLI-argument tests.
+
+The **integration** suite drives real Playwright runs and the local fixture server:
+
+| File | Covers |
+| --- | --- |
+| `approved-run-healing.spec.ts` (3) | same-page healing → `PASS_AFTER_HEALING`; a real assertion failure → Jira dry-run defect; a removed element → `NOT_HEALED` + human review |
+| `capture-artifacts.spec.ts` (2) | default artifact capture runs a real spec; `captureArtifacts: false` path |
+| `json-reporter-attribution.spec.ts` (2) | real per-test `PASS`/`FAIL`/`SKIPPED` attribution instead of the exit-code fallback; a missing test path is `playwright-json-no-tests`, not a fallback pass |
+| `jira-defect-dry-run.spec.ts` (1) | a category-A fixture produces a dry-run plan with no network mutation |
+| `qa-pipeline-e2e.spec.ts` (1) | the `qa` pipeline store carries its exploration, so `run-approved` reaches execution |
+| `fixtures/selfcheck.spec.ts` (1) | minimal spec used by the artifact-capture tests |
+
+Fixture specs written at test time (deliberately failing) are generated into `tests/integration/fixtures/`, deleted in `afterAll`, gitignored, and guarded by `QA_RUN_GENERATED_FIXTURES` so a leftover from a crashed run is collected but skipped.
+
+## 5. Execution results come from the JSON reporter
+
+`executePlaywright` runs Playwright with `--reporter json` and parses the payload. **Every reported test carries a `source` field** so a synthetic result can never be mistaken for a real one:
+
+| `source` | Meaning |
+| --- | --- |
+| `playwright-json` | A real per-test result read from `test.results[last]` — with the spec title, the test's own duration, and the failure message. |
+| `playwright-json-no-tests` | JSON parsed fine but Playwright executed nothing (for example `No tests found.`). Carries Playwright's own top-level error. |
+| `exit-code-fallback` | The JSON could not be parsed at all, so only the process exit code is known. Labelled explicitly, never presented as a per-test result. |
+
+Per-test results include `title`, `status` (`PASS` / `FAIL` / `BLOCKED` / `SKIPPED`), `durationMs`, `error`, `source` and a `diagnosis`.
+
+## 6. Failure classification
+
+`src/failure-classifier.ts` classifies from the **real per-test error text** and the reporter's own attempt status.
+
+- **A — real application defect** requires *positive evidence*: Playwright reported an `Expected:` / `Received:` diff, meaning a value was compared against a requirement after the locator resolved. A is the only `bugEligible` category.
+- **B — automation / test implementation issue**: CLI or tooling invocation failures (unknown option, process failed to start, `No tests found`) and locator problems (`LOCATOR_NOT_FOUND`, strict-mode violation, `<element(s) not found>`). A removed element lands here because no assertion was ever compared.
+- **C — environment / infrastructure**: browser executable missing, interrupted runs, HTTP ≥ 500 without a transient marker.
+- **D — flaky / transient**: a `timedOut` attempt or transient timing markers. Retryable.
+- **E — blocked / missing requirement**: only from a blocked/failed exploration or an explicit missing-requirement, credentials or authentication statement.
+
+**Unrecognized failures default to B and are never Jira-eligible.** They are labelled *"unclassified, needs human review"*.
+
+`timedOut` and `interrupted` are reported as **FAIL**, not BLOCKED: in both cases the test executed against a reachable target and did not pass. BLOCKED is reserved for genuine no-verdict outcomes (zero tests executed, runner categories E/C).
+
+## 7. Needs Human Review in the final report
+
+`reports/<run-id>/final-report.json` contains a `sections.humanReview` section, and the PDF renders the same content immediately after the run summary:
+
+```text
+NEEDS HUMAN REVIEW: 2 signal(s) across 1 test(s)
+  1. [healing] No candidate passed strict live validation …; HUMAN_REVIEW_REQUIRED
+  2. [failure-classification] generated/DemoRemoved/TC-DEMO-REMOVED.spec.ts — … possible real application change …
+```
+
+This exists because a removed element is category **B**, which would otherwise be indistinguishable from an ordinary typo'd selector inside the failure-classification buckets. One removed element produces two corroborating signals — the healing `NOT_HEALED` entry and the B classification — so `count` is the number of signals and `distinctTests` the number of affected tests.
+
+## 8. Artifact capture
+
+Screenshot and video are configured in `playwright.config.ts` as `use` options, **not** as CLI flags:
+
+```text
+video:      'retain-on-failure'
+screenshot: 'only-on-failure'
+```
+
+The Playwright CLI exposes only `--trace`; there is no `--video` or `--screenshot` option, and passing them made the runner exit with `unknown option` before executing a single test. Only `--trace retain-on-failure` is passed on the command line.
+
+Because video is retained *only on failure*, a fully passing run produces no `.webm`. Verifying capture therefore requires a deliberately failing run.
+
+There is no hardcoded `baseURL`. Every spec navigates to an absolute URL, which is what the automation generator emits from `explorationResult.target.url`.
+
+## 9. Status table
+
 | Capability | Status |
 | --- | --- |
 | Website exploration | IMPLEMENTED |
@@ -59,412 +161,151 @@ Serve the local fixture site; run TypeScript validation; run the targeted forbid
 | `expectedAssertion`: unverifiable outcomes flagged | IMPLEMENTED |
 | POM/Playwright spec generation | IMPLEMENTED for eligible ready cases |
 | Test execution | IMPLEMENTED for focused approved cases |
-| Failure classification A–E | IMPLEMENTED; evidence-based confirmation remains necessary |
+| Per-test JSON reporter parsing | IMPLEMENTED, verified against Playwright 1.62.1 |
+| Failure classification A–E | IMPLEMENTED; category A requires a verified assertion diff |
 | Validated same-page locator healing with re-execution | IMPLEMENTED for eligible locator failures |
 | Final JSON report aggregation | IMPLEMENTED for approved-run output |
+| Human-review section in JSON and PDF | IMPLEMENTED |
 | PDF report | PARTIAL — structured text-based renderer, not rich layout |
 | Jira defect sink, dry-run | IMPLEMENTED; no real issue created |
 | Jira defect sink, real creation | PARTIAL — injected client and explicit opt-in path, not verified against live Jira |
 | Smoke test wiring | PARTIAL — discovery exists; automatic config-driven runs are not wired |
 | Regression test wiring | PARTIAL — discovery exists; automatic config-driven runs are not wired |
-| Packaged end-to-end demo script (Phase 7) | NOT STARTED |
+| Packaged end-to-end demo script | NOT STARTED |
 | Phase 6 automatic smoke/regression wiring | NOT STARTED |
 
-Earlier phase verification reported 125 passing unit tests and 152 discovered tests in 39 files. These are historical run counts, not a claim about a fresh run.
+## 10. Known limitations
 
-## 4. Known limitations
-- Executable-vs-flagged assertion coverage on the real local fixture was **1/8 = 12.5%** before human-supplied outcomes. Other sites and requirements can differ.
-- Healing only repairs locator-not-found or locator-empty failures. It never heals assertion failures, and never heals without a live role/name match. This is intentional.
-- Jira real creation is off by default and requires an explicitly supplied Jira client plus `createReal: true`; no live creation was verified.
-- Smoke and regression discovery are not wired into automatic config-driven runs (Phase 6 not started).
-- No packaged end-to-end demo script exists (Phase 7 not started). The local fixture and integration tests are separate.
+Verified as still open:
+
+- `--config` is passed to Playwright only when `options.storageState` is set, which is semantically unrelated. An explicit `cwd` therefore bypasses `playwright.config.ts` entirely, including the capture settings. Tracked as a TODO in `src/execution-engine.ts`.
+- `healLocator` in `src/locator-healing.ts` takes an **optional** `validate` callback and defaults to fail-open: `validate ? validate(selector) : true` reports `HEALED` when no validation is supplied.
+- `scripts/heal.js` imports `healLocator` but never calls it; `main()` only prints a `BLOCKED` stub. `MAX_HEAL_ATTEMPTS` is documented in earlier revisions but is not read anywhere.
+- Two independent defect-deduplication mechanisms exist and can disagree: a SHA-256 `defectFingerprint` plus a Jira JQL `text ~` search in `src/jira-defects.ts`, and an in-memory `Defect.fingerprint` map with `findByFingerprint` in `src/defect-model.ts`.
 - `npm run lint` is a targeted check for `waitForTimeout`, `nth()` and XPath, **not** ESLint with TypeScript coverage.
-- The PDF renderer is text-based and limited; it is not a rich paginated layout engine.
-- Evidence paths are checked; a missing artifact is reported as missing, not proof of a passing run. No real Jira issue creation has been validated.
+- The PDF renderer is text-based, truncates its content at 5000 characters, and is not a rich paginated layout engine.
+- Jira real creation is off by default and requires an explicitly supplied Jira client plus `createReal: true`; no live creation was verified.
+- Evidence paths are checked; a missing artifact is reported as missing, not as proof of a passing run.
+- Smoke and regression discovery are not wired into automatic config-driven runs.
+- No packaged end-to-end demo script exists.
 
-## 5. Architecture overview
-- `src/qa-pipeline.ts` — normalizes requirements, explores, generates cases and stops at the approval gate.
+Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; exit-code-fallback per-test attribution; Playwright 1.62 reporter parsing; category-A false positives from locator failures; unrecognized failures defaulting to Jira-eligible; the `qa` pipeline losing its exploration result; the hardcoded `baseURL`.
+
+## 11. Architecture overview
+
+- `src/qa-pipeline.ts` — normalizes requirements, explores, generates cases, stops at the approval gate. Carries the exploration into the approval store so `run-approved` can execute.
 - `src/approval-store.ts` — persists cases and enforces approval states.
 - `src/test-case-generator.ts` — creates cases, assertions, provenance, flags and coverage counts.
 - `src/automation-generator.ts` — generates TypeScript Page Objects and Playwright specs from eligible ready cases.
-- `src/execution-engine.ts` — invokes Playwright and captures execution and evidence metadata.
+- `src/execution-engine.ts` — builds the Playwright CLI arguments, parses the JSON reporter into per-test results, and captures evidence metadata.
+- `src/failure-classifier.ts` — classifies a real per-test error into A–E.
 - `src/validated-healing.ts` — bounds and validates candidate locator repairs.
-- `src/healing-runtime.ts` — validates/reruns repairs in the original Playwright page context.
+- `src/healing-runtime.ts` — validates and re-runs repairs in the original Playwright page context.
 - `src/approved-runner.ts` — connects approved cases to generation, execution, healing and defect dry-runs.
-- `src/final-report.ts` — aggregates run data, verifies evidence paths and saves sanitized JSON.
-- `src/jira-defects.ts` — handles optional defect fingerprints, dry-run and injected Jira client operations.
+- `src/final-report.ts` — aggregates run data, collects human-review cases, verifies evidence paths, saves sanitized JSON.
+- `src/jira-defects.ts` — optional defect fingerprints, dry-run and injected Jira client operations.
 
 ---
 
 ## Project History
+
 The original Jira/JPA workflow below is historical and superseded by the verified status table above.
 
-## 🔄 Project Workflow
-
-The agent follows this workflow:
-
-Jira Ticket
-↓
-Read Jira Task
-↓
-Move Ticket to In Progress
-↓
-Inspect Website using Playwright MCP
-↓
-Find and Verify Real Selectors
-↓
-Generate Playwright Test
-↓
-Run Test
-↓
-Fix Test if Failed
-↓
-Append Test Result to Jira
-↓
-Move Ticket to Done
-
----
-
-## 🛠️ Technologies Used
-
-- Codex
-- Jira
-- Jira REST API v3
-- Playwright
-- Playwright MCP
-- TypeScript
-- Node.js
-- Axios
-- dotenv
-- Git
-- GitHub
-
----
-
-## 📁 Project Structure
+### Project Workflow
 
 ```text
-JIRA-PLAYWRIGHT-AGENT/
-│
-├── .gitignore
-├── AGENTS.md
-├── package.json
-├── package-lock.json
-├── playwright.config.ts
-│
-├── jira-client.js
-├── test-browser.js
-├── test-jira.js
-│
-├── src/
-│   └── jira.ts
-│
-└── tests/
-    └── generated/
-        └── JPA-1.spec.ts
+Jira Ticket
+  ↓
+Read Jira Task
+  ↓
+Move Ticket to In Progress
+  ↓
+Inspect Website using Playwright MCP
+  ↓
+Find and Verify Real Selectors
+  ↓
+Generate Playwright Test
+  ↓
+Run Test
+  ↓
+Fix Test if Failed
+  ↓
+Append Test Result to Jira
+  ↓
+Move Ticket to Done
 ```
 
-🔐 Environment Variables
+### Environment Variables
 
-Jira credentials are stored in a local .env file.
+Jira credentials are stored in a local `.env` file and are never hardcoded in source code:
 
+```text
 JIRA_BASE_URL=https://your-site.atlassian.net
 JIRA_EMAIL=your-email@example.com
 JIRA_API_TOKEN=your-api-token
-
-The .env file is included in .gitignore and is not uploaded to GitHub.
-
-Credentials are never hardcoded in the source code.
-
-🔌 Jira API Integration
-
-The Jira integration is implemented in:
-
-src/jira.ts
-
-It provides four main functions:
-
-getTodoTasks(projectKey)
-
-Finds Jira issues with To Do status using JQL.
-
-getTaskDescription(issueKey)
-
-Gets a Jira issue description and converts Jira's ADF format into plain text.
-
-moveTask(issueKey, transitionName)
-
-Gets available Jira transitions and moves an issue to the requested status.
-
-Example:
-
-To Do → In Progress
-In Progress → Done
-updateDescription(issueKey, appendText)
-
-Adds test execution results to the existing Jira description without overwriting the existing content.
-
-🤖 AGENTS.md
-
-AGENTS.md contains the instructions for the Codex QA automation workflow.
-
-The agent is instructed to:
-
-Fetch a Jira task.
-Read its description.
-Move it to In Progress.
-Inspect the website using Playwright MCP.
-Verify real selectors.
-Generate a Playwright test.
-Run the test.
-Fix failures if required.
-Append the test result to Jira.
-Move the Jira task to Done after a successful test.
-
-The intended final interaction is:
-
-pick up JPA-X
-
-The agent should then perform the workflow automatically.
-
-🎭 Playwright MCP
-
-Playwright MCP allows Codex to interact with a real browser.
-
-It is used to:
-
-Open websites
-Inspect pages
-Find elements
-Verify selectors
-Click elements
-Enter text
-Navigate pages
-
-The agent verifies selectors against the real website before generating the test.
-
-🧪 Generated Tests
-
-Generated Playwright tests are stored in:
-
-tests/generated/
-
-Example:
-
-tests/generated/JPA-1.spec.ts
-
-The tests use role-based Playwright locators such as:
-
-page.getByRole()
-page.getByPlaceholder()
-page.getByText()
-page.getByLabel()
-
-XPath is not used.
-
-✅ JPA-1 Demonstration
-
-JPA-1 was created to test YouTube search functionality.
-
-The generated test:
-
-tests/generated/JPA-1.spec.ts
-
-performs these actions:
-
-Opens YouTube.
-Locates the search input.
-Enters Playwright testing.
-Submits the search.
-Verifies the search results URL.
-Verifies the page title.
-Verifies relevant search results content.
-Test Result
-1 passed
-
-The Jira task was then:
-
-To Do
-   ↓
-In Progress
-   ↓
-Test Generated
-   ↓
-Test Passed
-   ↓
-Jira Description Updated
-   ↓
-Done
-⚠️ Real-World Failure Handling
-
-During JPA-2 testing, the YouTube homepage did not contain visible video links in the Playwright browser session.
-
-The agent did not invent a selector or create a false test.
-
-Instead, it reported that the workflow was blocked.
-
-This demonstrates that the agent validates the real application state before generating automation.
-
-▶️ Run the Project
-
-Install dependencies:
-
-npm install
-
-Install Playwright browser:
-
-npx playwright install chromium
-If exploration or execution reports `PLAYWRIGHT_BROWSER_NOT_INSTALLED`, run `npx playwright install` and retry. This is an environment/infrastructure block, not an application defect.
-
-Run the generated test:
-
-npx playwright test tests/generated/JPA-1.spec.ts
-
-Run all tests:
-
-npx playwright test
-## Generic Autonomous QA Agent
-The core engine is platform-independent. Jira, Notion, Slack, and GitHub are optional providers; manual requirements and local files work without them. The current implementation supports browser exploration, structured test-case generation, human approval, deterministic POM/spec scaffolding, basic Playwright runner result capture, failure classification, evidence verification, regression discovery, smoke discovery, JSON reporting, PDF export, source normalization, provenance, HTTP-method conflict detection, and an approval-gated pipeline. Jira defect creation is an injected adapter boundary, self-healing is explicitly labeled heuristic candidate ranking, and the end-to-end pipeline stops at the human approval gate unless approved cases are supplied to later stages.
-
-### Generic requirements and optional integrations
-```powershell
-npm run qa --url "https://example.com" --module "Authentication" --scope "Login" --requirement "User can log in"
-npm run qa --url "https://example.com" --module "Authentication" --scope "Login" --spec "./specs/auth.md"
-npm run qa --url "https://example.com" --module "Authentication" --scope "Login" --spec "./specs/auth.json"
 ```
 
-Supported local source extensions are Markdown/TXT, JSON, YAML, and PDF. PDF extraction preserves page provenance through the asynchronous requirement loader. Optional integrations report `AVAILABLE` only when their configuration is present; otherwise they remain `UNAVAILABLE` and do not block the core engine. Configure `QA_ENVIRONMENT`, `BASE_URL`, `SELF_HEALING_MIN_CONFIDENCE`, and `MAX_HEAL_ATTEMPTS` as non-secret runtime settings. Jira variables such as `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, and `JIRA_PROJECT_KEY` are optional.
+`.env` is in `.gitignore` and is not uploaded. Optional integrations report `AVAILABLE` only when their configuration is present; otherwise they remain `UNAVAILABLE` and do not block the core engine.
+
+### Jira API Integration
+
+`src/jira.ts` provides `getTodoTasks(projectKey)`, `getTaskDescription(issueKey)`, `moveTask(issueKey, transitionName)` and `updateDescription(issueKey, appendText)`. The description update is append-only and never overwrites the original requirement.
+
+### AGENTS.md
+
+`AGENTS.md` is the authoritative QA automation workflow specification for the agent: dynamic Jira scope discovery, priority ordering, dependency graphs, per-ticket isolation, expected-vs-actual validation, the A–E failure taxonomy, controlled retries, evidence rules and the final report format.
+
+### Playwright MCP
+
+Playwright MCP lets the agent open pages, inspect the DOM, find elements, verify selectors, click and type against the real site before any test is generated. Selectors are verified against the live application first.
+
+### Generated Tests
+
+Generated specs live in `tests/generated/` (UI) and `tests/api/` (API) and use role-based locators. XPath is not used.
+
+### JPA-1 Demonstration
+
+JPA-1 exercised YouTube search: open the homepage, locate the search input, enter a query, submit, verify the results URL, page title and result content. Result: 1 passed, then the Jira ticket moved to Done.
+
+### JPA-2 Real-World Failure Handling
+
+During JPA-2 the YouTube homepage exposed no video links in the Playwright browser session. The agent did not invent a selector or a false test; it reported the workflow as blocked. This is the intended behaviour — the live application state is validated before automation is generated.
+
+### Running the Project
+
+```powershell
+npm ci
+npx playwright install chromium
+npx playwright test tests/generated/JPA-1.spec.ts   # a single focused spec
+npx playwright test                                   # all collected specs
+```
+
+If exploration or execution reports `PLAYWRIGHT_BROWSER_NOT_INSTALLED`, run `npx playwright install` and retry. That is an environment/infrastructure block (category C), not an application defect.
+
+### Generic Requirements and Optional Integrations
+
+```powershell
+node scripts/qa.js --url "https://example.com" --module "Authentication" --scope "Login" --requirement "User can log in"
+node scripts/qa.js --url "https://example.com" --module "Authentication" --scope "Login" --spec "./specs/auth.md"
+```
+
+Supported local source extensions are Markdown/TXT, JSON, YAML and PDF; PDF extraction preserves page provenance. Jira remains an optional adapter and must not be required for local or offline QA workflows.
 
 The core architecture is:
 
 ```text
-Requirement providers → normalized generic requirements → exploration → test cases
+Requirement providers → normalized requirements → exploration → test cases
 → human approval → READY_FOR_AUTOMATION → POM/spec generation → Playwright execution
-→ classification → heuristic healing decision → evidence → generic report → optional PDF
+→ per-test result parsing → classification → healing decision → evidence
+→ final report → optional PDF
 ```
 
-Jira remains an adapter and must not be required for local or offline QA workflows.
+### Security
 
-### Phase 1: Explore a target
-```powershell
-npm run explore --url "https://example.com" --module "Authentication" --scope "Login and logout" --requirement "User can log in" --requirement "Invalid credentials show an error" --output "exploration.json"
-```
+Never commit `.env`. `.gitignore` protects `node_modules/`, `.env`, `playwright-report/`, `test-results/`, generated module folders under `tests/generated/` and test-time generated fixtures.
 
-The result is structured JSON containing the target and supplied requirements, visited pages, observed elements and semantic selector candidates, inferred workflows, requirement coverage, warnings, and per-page provenance. Exploration follows same-origin, scope-relevant links only, avoids destructive controls, and returns `BLOCKED / AUTH REQUIRED` when an authentication wall is observed without an authenticated session.
+### Future Improvements
 
-### Phase 2: Generate test cases
-```powershell
-npm run generate-tests --exploration "exploration.json" --jira-key "JPA-123" --output "generated-test-cases.json"
-```
-
-Requirements are taken from repeated `--requirement` flags when supplied; otherwise they are read from `exploration.target.requirements`. Generated cases preserve Jira/Notion/requirement provenance and browser observation references. Every case starts as `PENDING_APPROVAL`. Unknown or underspecified requirements are explicitly marked `UNKNOWN / REQUIRES CLARIFICATION`.
-
-### Phase 3: Review and approve
-```powershell
-npm run approve-tests -- list
-npm run approve-tests -- pending --store "<approval-store-id>"
-npm run approve-tests -- show --store "<approval-store-id>"
-npm run approve-tests -- approve --store "<approval-store-id>" --id "<test-case-id>" --reviewer "human" --comment "Approved for automation"
-npm run approve-tests -- reject --store "<approval-store-id>" --id "<test-case-id>" --reviewer "human" --comment "Out of scope"
-npm run approve-tests -- ready --store "<approval-store-id>"
-```
-
-Approval stores are saved under `test-cases/`. The state gate is explicit: `PENDING_APPROVAL` → `APPROVED` or `REJECTED`; edits invalidate prior approval and return the case to `PENDING_APPROVAL` while preserving an `EDITED` approval record. Rejected cases cannot be approved or automated. Reviewer comments and edited string fields are sanitized before persistence.
-
-### Example exploration output
-```json
-{
-  "target": {
-    "url": "https://example.com/login",
-    "module": "Authentication",
-    "scope": "Login and logout",
-    "requirements": ["User can log in", "Invalid credentials show an error"]
-  },
-  "status": "SUCCESS",
-  "pagesVisited": ["https://example.com/login"],
-  "elements": [{
-    "id": "ELEM-0001",
-    "type": "button",
-    "role": "button",
-    "name": "Login",
-    "selectorCandidates": ["getByRole('button', { name: 'Login' })"],
-    "url": "https://example.com/login",
-    "source": "browser-exploration"
-  }],
-  "workflows": [],
-  "observations": [],
-  "requirementsCoverage": [],
-  "warnings": [],
-  "provenance": []
-}
-```
-
-### Example generated test case
-```json
-{
-  "testCaseId": "TC-AUTH-001",
-  "title": "[Positive] User can log in",
-  "objective": "Verify that: User can log in",
-  "preconditions": ["Target URL is accessible: https://example.com/login"],
-  "testData": "Valid test data as per requirement",
-  "steps": [{
-    "step": 1,
-    "action": "Click \"Login\" button",
-    "expected": "Action is triggered successfully",
-    "selectorHint": "getByRole('button', { name: 'Login' })",
-    "sourceElementId": "ELEM-0001"
-  }],
-  "expectedResult": "System behaves as specified: User can log in",
-  "priority": "Medium",
-  "testType": "Functional",
-  "module": "Authentication",
-  "sourceRequirements": ["User can log in"],
-  "explorationReferences": ["ELEM-0001"],
-  "assumptions": [],
-  "risks": [],
-  "status": "PENDING_APPROVAL"
-}
-```
-
-### Example approval output
-```json
-{
-  "approved": ["TC-AUTH-001"],
-  "failed": [],
-  "summary": {
-    "total": 1,
-    "pending": 0,
-    "approved": 1,
-    "rejected": 0,
-    "edited": 0,
-    "readyForAutomation": 0
-  }
-}
-```
-
-Only after a separate explicit `ready` command does an approved case become `READY_FOR_AUTOMATION`. POM/spec generation is available through `npm run generate-pom --input <json>`, execution through `npm run execute-tests -- <path.spec.ts>`, and deterministic locator ranking is available as a library. Jira defect creation requires an explicitly configured injected client; no live Jira mutation is performed by default. Regression and smoke commands discover only verified repository tests and never invent smoke flows. The current `heal` command reports that integration-specific observed elements and validation context are required; it does not silently mutate tests.
-
-🔒 Security
-
-Never commit:
-
-.env
-
-The .gitignore file protects:
-
-node_modules/
-.env
-playwright-report/
-test-results/
-.playwright-mcp/
-🚀 Future Improvements
-Complete per-test Playwright JSON parsing and browser artifact orchestration.
-Connect heuristic healing decisions to controlled re-execution with explicit validation.
-Add production adapters for Jira, Notion, Slack, and GitHub behind generic interfaces.
-Expand rich PDF rendering and final report aggregation.
-Add configured smoke metadata and full offline end-to-end fixtures.
-🎥 Demonstration
-
-A screen recording demonstrates the complete JPA-1 workflow from Jira task processing to Playwright test execution and Jira completion.
-
-The earlier emoji "Project Status" checklist that used to appear here was removed, because it contradicted the verified status table at the top of this file.
+- Add production adapters for Jira, Notion, Slack and GitHub behind generic interfaces.
+- Expand rich PDF rendering and final report aggregation.
+- Add configured smoke metadata and full offline end-to-end fixtures.
