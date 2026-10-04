@@ -22,6 +22,18 @@ npx playwright install chromium
 
 **Why Playwright is pinned exactly.** `src/execution-engine.ts` (JSON reporter parsing) and `src/failure-classifier.ts` (message-text classification) both depend on the **Playwright 1.62** reporter schema and error-message wording. 1.62 moved the per-test outcome, duration and errors into `test.results[last]`, made `test.status` an expectation resolution, and renders a missing element as the literal placeholder `<element(s) not found>`. Both modules are verified against **1.62.1** only. A minor or major bump may silently break parsing or classification, so treat an upgrade as a code change and re-run the full suites.
 
+### Configuration
+
+`.env.example` at the repository root documents every environment variable the code reads, with a placeholder value and a one-line note on what each one is and whether it is optional:
+
+```powershell
+Copy-Item .env.example .env    # PowerShell
+```
+
+Only `src/jira.ts` requires configuration (`JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`) and it throws when they are missing. Every other integration — GitHub, Notion, Slack — is optional: when its variable is absent the adapter reports `UNAVAILABLE` and the core engine still runs against a supplied URL or the local fixture.
+
+`.env` is gitignored and must never be committed; `.env.example` is tracked and contains placeholders only.
+
 ## 3. How to run it
 
 Run from the repository root.
