@@ -77,9 +77,11 @@ Serve the local fixture site; run TypeScript validation; run the targeted forbid
 ## 4. Test suites
 
 ```powershell
-npx playwright test tests/unit          # 178 passed
+npx playwright test tests/unit          # 178 collected: 177 passed, 1 skipped
 npx playwright test tests/integration   #  10 passed
 ```
+
+The single skipped unit test asserts against the stored `reports/integration-defect` artifact, so it self-skips in a fresh clone until an integration run has produced that file. It passes once the artifact exists.
 
 The **unit** suite is pure and fast; it includes 16 JSON-reporter parser tests, 28 failure-classifier tests, 9 final-report tests and 4 CLI-argument tests.
 
