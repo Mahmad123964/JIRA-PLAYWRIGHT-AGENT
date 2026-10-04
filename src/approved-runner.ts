@@ -7,6 +7,7 @@ import type { ExplorationResult } from "./browser-explorer";
 import type { TestCase } from "./test-case-generator";
 import { validatedHeal, type ValidatedHealingResult } from "./validated-healing";
 import { createDefect, selectJiraEligibleFailure, type DefectResult } from "./jira-defects";
+import { fingerprintSpec, type ArtifactFingerprint } from "./artifact-fingerprint";
 
 export interface ApprovedRunnerOptions {
   storeId: string;
@@ -28,7 +29,14 @@ export interface BlockedApprovedCase {
 export interface ApprovedRunResult {
   runId: string;
   storeId: string;
-  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED";
+status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED";
+  /**
+   * sha256 of each executed spec together with the Page Object it imports.
+   * Regression selection re-hashes the files on disk and excludes a spec whose
+   * content no longer matches the run that recorded the PASS baseline, so a
+   * regenerated spec can never silently inherit an older baseline.
+   */
+  fingerprints?: ArtifactFingerprint[];
   approval: {
     readyCaseIds: string[];
     excludedCaseIds: string[];
@@ -128,7 +136,12 @@ export async function runApprovedCases(options: ApprovedRunnerOptions): Promise<
     if (!selectJiraEligibleFailure(failure)) continue;
     defects.push(await createDefect({ projectKey: process.env.JIRA_PROJECT_KEY || "LOCAL", sourceIssueKey: failure.path, summary: "Verified application assertion failure", requirement: executable.map((item) => item.sourceRequirements.join("; ")).join("; "), expected: "Requirement expected result", actual: failure.stderr || failure.stdout, environment: options.environment || execution.environment, browser: options.browser, url: exploration.result.target.url, runId, evidence: JSON.stringify(execution.evidence) }));
   }
-  const result: ApprovedRunResult = { runId, storeId: store.storeId, status, approval: { readyCaseIds, excludedCaseIds: store.testCases.filter((item) => !readyCaseIds.includes(item.testCaseId)).map((item) => item.testCaseId), blockedCases }, exploration: { status: exploration.result.explorationStatus, source: exploration.source, path: exploration.path }, automation, execution: executionWithoutHealing, healing: executionHealing || healing, defects };
+  // Record a content fingerprint for every executed spec together with the POM
+  // it imports. Regression selection re-hashes the files on disk and excludes a
+  // spec whose content no longer matches the run that recorded the PASS
+  // baseline, so a regenerated spec can never inherit an older baseline.
+  const fingerprints = specPaths.map((specPath) => fingerprintSpec(process.cwd(), specPath));
+  const result: ApprovedRunResult = { runId, storeId: store.storeId, status, approval: { readyCaseIds, excludedCaseIds: store.testCases.filter((item) => !readyCaseIds.includes(item.testCaseId)).map((item) => item.testCaseId), blockedCases }, exploration: { status: exploration.result.explorationStatus, source: exploration.source, path: exploration.path }, automation, execution: executionWithoutHealing, healing: executionHealing || healing, defects, fingerprints };
   fs.mkdirSync(reportRoot, { recursive: true });
   const resultPath = path.join(reportRoot, "approved-run-result.json");
   fs.writeFileSync(resultPath, JSON.stringify(result, null, 2), "utf8");

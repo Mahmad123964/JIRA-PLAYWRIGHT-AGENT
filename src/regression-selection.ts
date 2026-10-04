@@ -23,6 +23,7 @@ import path from "path";
  * reason, so the selection is auditable rather than a bare list of paths.
  */
 import type { TestResultSource } from "./execution-engine";
+import { compareFingerprint, type ArtifactFingerprint } from "./artifact-fingerprint";
 
 export interface SelectionCandidate {
   /** Repo-relative, forward-slash spec path. */
@@ -55,6 +56,7 @@ export interface StoredRun {
   storeId?: string;
   automation?: { generated?: StoredGenerated[] };
   execution?: { tests?: StoredTest[] };
+  fingerprints?: ArtifactFingerprint[];
 }
 
 const REPO_RELATIVE_SPEC = /(?:^|[\\/])tests[\\/](generated|api)[\\/].+\.spec\.ts$/;
@@ -99,14 +101,21 @@ export function readStoredRuns(reportsRoot: string): StoredRun[] {
  * Only source "playwright-json" entries are considered, so a fallback-derived or
  * no-tests result can never establish (or overwrite) a baseline. Later runs win.
  */
-export function buildLastKnownResults(runs: StoredRun[], root: string): Map<string, { status: string; source: string; runId: string }> {
-  const latest = new Map<string, { status: string; source: string; runId: string }>();
+export function buildLastKnownResults(runs: StoredRun[], root: string): Map<string, { status: string; source: string; runId: string; fingerprint?: ArtifactFingerprint }> {
+  const latest = new Map<string, { status: string; source: string; runId: string; fingerprint?: ArtifactFingerprint }>();
   const ordered = [...runs].sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
   for (const run of ordered) {
+    // Fingerprints are indexed by spec path so a baseline can be compared against
+    // the bytes currently on disk.
+    const fingerprintByPath = new Map<string, ArtifactFingerprint>();
+    for (const fingerprint of run.fingerprints || []) {
+      if (fingerprint?.specPath) fingerprintByPath.set(toRepoRelativeSpec(fingerprint.specPath, root), fingerprint);
+    }
     for (const test of run.execution?.tests || []) {
       if (!test?.path) continue;
       if (String(test.source || "") !== "playwright-json") continue;
-      latest.set(toRepoRelativeSpec(test.path, root), { status: String(test.status || ""), source: "playwright-json", runId: String(run.runId || "") });
+      const specPath = toRepoRelativeSpec(test.path, root);
+      latest.set(specPath, { status: String(test.status || ""), source: "playwright-json", runId: String(run.runId || ""), fingerprint: fingerprintByPath.get(specPath) });
     }
   }
   return latest;
@@ -147,13 +156,17 @@ export function buildApprovedSpecIndex(input: { runs: StoredRun[]; testCasesRoot
  * repository's own unit and integration suites are not application regression
  * targets.
  */
-export function selectRegressionSpecs(input: { specPaths: string[]; root: string; lastKnown: Map<string, { status: string; source: string; runId: string }>; approved: Map<string, { storeId: string; testCaseId: string; status: string }> }): { included: string[]; candidates: SelectionCandidate[] } {
+export function selectRegressionSpecs(input: { specPaths: string[]; root: string; lastKnown: Map<string, { status: string; source: string; runId: string; fingerprint?: ArtifactFingerprint }>; approved: Map<string, { storeId: string; testCaseId: string; status: string }> }): { included: string[]; candidates: SelectionCandidate[] } {
   const candidates: SelectionCandidate[] = [];
   const included: string[] = [];
   for (const raw of input.specPaths) {
     const specPath = toRepoRelativeSpec(raw, input.root);
     const approval = input.approved.get(specPath);
     const last = input.lastKnown.get(specPath);
+    // Content drift check. Done last so the more fundamental reasons (not
+    // approved, no baseline, wrong source, last status not PASS) are reported
+    // first, but a drifted file is ALWAYS excluded regardless.
+    const drift = last?.status === "PASS" ? compareFingerprint(last.fingerprint, input.root) : { status: "ok" as const };
     let reason: string;
     if (!REPO_RELATIVE_SPEC.test(specPath)) {
       reason = "excluded: not an application regression target (must live under tests/generated or tests/api)";
@@ -165,8 +178,10 @@ export function selectRegressionSpecs(input: { specPaths: string[]; root: string
       reason = `excluded: last recorded result came from source "${last.source}", which is not a real per-test result`;
     } else if (last.status !== "PASS") {
       reason = `excluded: last recorded per-test status was ${last.status}, not PASS`;
+    } else if (drift.status !== "ok") {
+      reason = `excluded: ${drift.reason}`;
     } else {
-      reason = `included: READY_FOR_AUTOMATION in ${approval.storeId} and last per-test result was PASS (run ${last.runId})`;
+      reason = `included: READY_FOR_AUTOMATION in ${approval.storeId} and last per-test result was PASS (run ${last.runId}) with unchanged content`;
     }
     const candidate: SelectionCandidate = { specPath, included: reason.startsWith("included:"), reason, lastStatus: last?.status, lastSource: last?.source, approvedIn: approval?.storeId, testCaseId: approval?.testCaseId, approvalStatus: approval?.status };
     candidates.push(candidate);
