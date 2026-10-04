@@ -7,7 +7,10 @@ function element(overrides: Partial<DiscoveredElement> = {}): DiscoveredElement 
 }
 
 test("broken locator heals, reruns action and assertion, and reports PASS_AFTER_HEALING", async () => {
-  const result = await validatedHeal({ originalLocator: "getByRole('button', { name: 'Old' })", originalRole: "button", originalName: "Submit", failureKind: "LOCATOR_NOT_FOUND", elements: [element()], threshold: 0.85, rerun: async () => ({ action: "PASS", assertion: "PASS" }) });
+  // The validator must be explicit. validatedHeal now fails closed when no
+  // validateCandidate is supplied, so an omitted validator yields NOT_HEALED.
+  // See tests/unit/healing-fail-closed.spec.ts for that contract.
+  const result = await validatedHeal({ originalLocator: "getByRole('button', { name: 'Old' })", originalRole: "button", originalName: "Submit", failureKind: "LOCATOR_NOT_FOUND", elements: [element()], threshold: 0.85, validateCandidate: async (candidate) => ({ count: 1, visible: true, enabled: true, role: candidate.role, name: candidate.name }), rerun: async () => ({ action: "PASS", assertion: "PASS" }) });
   expect(result.outcome).toBe("PASS_AFTER_HEALING");
   expect(result.attempts[0].initialResult).toBe("FAIL");
   expect(result.attempts[0].healedResult).toBe("PASS/PASS");
