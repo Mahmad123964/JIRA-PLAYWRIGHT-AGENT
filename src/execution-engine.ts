@@ -32,7 +32,7 @@ interface JsonReporterSpec { title?: string; file?: string; tests?: JsonReporter
 interface JsonReporterSuite { title?: string; file?: string; specs?: JsonReporterSpec[]; suites?: JsonReporterSuite[] }
 interface JsonReporterOutput { suites?: JsonReporterSuite[]; errors?: JsonReporterError[]; stats?: { duration?: number } }
 
-export interface ParsedPlaywrightTest { title: string; path: string; status: ExecutionTestStatus; durationMs: number; error?: string }
+export interface ParsedPlaywrightTest { title: string; path: string; status: ExecutionTestStatus; durationMs: number; error?: string; reporterStatus?: string }
 export interface PlaywrightJsonParse { ok: boolean; reason?: string; tests: ParsedPlaywrightTest[]; topLevelErrors: string[]; totalDurationMs: number }
 
 /**
@@ -129,6 +129,7 @@ export function parsePlaywrightJson(stdout: string): PlaywrightJsonParse {
             status,
             durationMs: typeof attempt?.duration === "number" ? attempt.duration : 0,
             error: messages.length ? messages.join("\n") : undefined,
+            reporterStatus: attempt?.status,
           });
         }
       }
@@ -185,17 +186,26 @@ export function buildPlaywrightArgs(testPaths: string[], options: ExecutionOptio
  *  - `playwright-json-no-tests` when the JSON was valid but Playwright ran
  *    nothing, carrying Playwright's own top-level error
  *  - `exit-code-fallback` only when stdout was not parseable JSON at all
+ *
+ * `diagnose` is invoked with the real per-test error text and the reporter's own
+ * attempt status, so classification reflects THIS test rather than the whole
+ * runner payload. It is omitted for non-failing tests, and `runDiagnosis` (a
+ * whole-run classification) is used whenever a per-test signal is unavailable.
  */
-export function buildExecutionTests(input: { parsedJson: PlaywrightJsonParse; testPaths: string[]; wallClockMs: number; exitCodeStatus: ExecutionTestStatus; diagnosis?: FailureDiagnosis; stdout: string; stderr: string }): ExecutionTestResult[] {
-  const { parsedJson, testPaths, wallClockMs, exitCodeStatus, diagnosis, stdout, stderr } = input;
+export function buildExecutionTests(input: { parsedJson: PlaywrightJsonParse; testPaths: string[]; wallClockMs: number; exitCodeStatus: ExecutionTestStatus; runDiagnosis?: FailureDiagnosis; diagnose?: (error: string | undefined, reporterStatus: string | undefined) => FailureDiagnosis; stdout: string; stderr: string }): ExecutionTestResult[] {
+  const { parsedJson, testPaths, wallClockMs, exitCodeStatus, runDiagnosis, diagnose, stdout, stderr } = input;
   const runnerOutput = { stdout, stderr };
   if (!parsedJson.ok) {
-    return [{ path: testPaths.join(","), title: "(runner output could not be parsed)", status: exitCodeStatus, durationMs: wallClockMs, error: `Playwright JSON reporter output could not be parsed, so this is an exit-code fallback rather than a per-test result: ${parsedJson.reason}`, source: "exit-code-fallback", diagnosis, ...runnerOutput }];
+    return [{ path: testPaths.join(","), title: "(runner output could not be parsed)", status: exitCodeStatus, durationMs: wallClockMs, error: `Playwright JSON reporter output could not be parsed, so this is an exit-code fallback rather than a per-test result: ${parsedJson.reason}`, source: "exit-code-fallback", diagnosis: runDiagnosis, ...runnerOutput }];
   }
   if (!parsedJson.tests.length) {
-    return [{ path: testPaths.join(","), title: "(no tests executed)", status: parsedJson.topLevelErrors.length ? exitCodeStatus : "SKIPPED", durationMs: parsedJson.totalDurationMs, error: parsedJson.topLevelErrors.length ? parsedJson.topLevelErrors.join("\n") : "Playwright reported no tests and no errors.", source: "playwright-json-no-tests", diagnosis, ...runnerOutput }];
+    return [{ path: testPaths.join(","), title: "(no tests executed)", status: parsedJson.topLevelErrors.length ? exitCodeStatus : "SKIPPED", durationMs: parsedJson.totalDurationMs, error: parsedJson.topLevelErrors.length ? parsedJson.topLevelErrors.join("\n") : "Playwright reported no tests and no errors.", source: "playwright-json-no-tests", diagnosis: runDiagnosis, ...runnerOutput }];
   }
-  return parsedJson.tests.map((item) => ({ path: item.path, title: item.title, status: item.status, durationMs: item.durationMs, error: item.error, source: "playwright-json", diagnosis: item.status === "PASS" || item.status === "SKIPPED" ? undefined : diagnosis, ...runnerOutput }));
+  return parsedJson.tests.map((item) => {
+    const failed = item.status === "FAIL" || item.status === "BLOCKED";
+    const perTest = failed && diagnose ? diagnose(item.error, item.reporterStatus) : undefined;
+    return { path: item.path, title: item.title, status: item.status, durationMs: item.durationMs, error: item.error, source: "playwright-json", diagnosis: failed ? perTest || runDiagnosis : undefined, ...runnerOutput };
+  });
 }
 
 export async function executePlaywright(testPaths: string[], options: ExecutionOptions): Promise<ExecutionResult> {
@@ -207,7 +217,25 @@ export async function executePlaywright(testPaths: string[], options: ExecutionO
   const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => { const child = spawn(process.execPath, args, { cwd, shell: false, env: childEnv }); let stdout = ""; let stderr = ""; child.stdout.on("data", (d) => { stdout += d.toString(); }); child.stderr.on("data", (d) => { stderr += d.toString(); }); child.on("close", (code) => resolve({ code, stdout, stderr })); child.on("error", (error) => resolve({ code: null, stdout, stderr: `${stderr}${error.message}` })); });
   const diagnosis = result.code === 0 ? undefined : classifyProcessFailure(result.stdout, result.stderr);
   const exitCodeStatus: ExecutionTestStatus = result.code === 0 ? "PASS" : diagnosis?.category.startsWith("E.") || diagnosis?.category.startsWith("C.") ? "BLOCKED" : "FAIL";
-  const tests = buildExecutionTests({ parsedJson: parsePlaywrightJson(result.stdout), testPaths, wallClockMs: Date.now() - started, exitCodeStatus, diagnosis, stdout: result.stdout, stderr: result.stderr });
+  const tests = buildExecutionTests({
+    parsedJson: parsePlaywrightJson(result.stdout),
+    testPaths,
+    wallClockMs: Date.now() - started,
+    exitCodeStatus,
+    runDiagnosis: diagnosis,
+    // Classify from THIS test's real error text and the reporter's own attempt
+    // status, falling back to the whole-run payload only when the test reported
+    // no error of its own.
+    diagnose: (error, reporterStatus) => classifyFailure({
+      message: error || result.stdout,
+      stack: error ? undefined : result.stderr,
+      reporterStatus,
+      browserUnavailable: /executable doesn't exist|browser.*not installed/i.test(`${result.stdout} ${result.stderr}`),
+      timedOut: reporterStatus === "timedOut",
+    }),
+    stdout: result.stdout,
+    stderr: result.stderr,
+  });
   const statusCounts = tests.reduce((counts, item) => { counts[item.status.toLowerCase() as "pass" | "fail" | "blocked" | "skipped"]++; return counts; }, { pass: 0, fail: 0, blocked: 0, skipped: 0 });
   evidence.addText("runner-log", "runner.log", `${result.stdout}\n${result.stderr}`);
   const artifactRoot = path.resolve(cwd, "test-results");
