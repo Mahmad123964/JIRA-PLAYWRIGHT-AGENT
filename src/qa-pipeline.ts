@@ -34,7 +34,12 @@ export async function runQaPipeline(input: QaPipelineInput): Promise<QaPipelineR
   const exploration = await exploreUrl(explorationInput, { headless: input.headless !== false });
   audit.record({ phase: "EXPLORATION", action: "COMPLETED", source: input.url, decision: exploration.explorationStatus || exploration.status, reason: exploration.error });
   const generated = generateTestCases({ requirements, explorationResult: exploration, module: input.module, scope: input.scope, jiraTicketKey: input.jiraKey });
-  const store = createApprovalStore(input.module, input.scope, generated.testCases); const storePath = saveApprovalStore(store);
+  // The exploration MUST be carried into the approval store. runApprovedCases
+  // re-checks every case against it (caseBlockReason) and refuses to execute
+  // anything without a verified SUCCESS exploration, so a store created without
+  // it is permanently BLOCKED with "Verified exploration result is unavailable"
+  // and the run can never reach execution.
+  const store = createApprovalStore(input.module, input.scope, generated.testCases, exploration); const storePath = saveApprovalStore(store);
   audit.record({ phase: "APPROVAL", action: "CREATED", outputReference: storePath, decision: "PENDING_APPROVAL" });
   const reportDir = path.resolve(input.outputRoot || "reports", runId); fs.mkdirSync(reportDir, { recursive: true });
   const report = createQaReport({ runId, environment: input.environment || "unknown", module: input.module, scope: input.scope, url: input.url, status: exploration.explorationStatus === "SUCCESS" ? "PARTIAL" : "BLOCKED", sections: { integrations: getIntegrationHealth(), requirements: context, exploration, testCases: generated, approvalStore: store.storeId, automation: { status: "BLOCKED", reason: "Human approval is a hard gate; no READY_FOR_AUTOMATION cases were supplied to this pipeline run." } }, auditTrail: audit.events });
