@@ -101,11 +101,11 @@ Serve the local fixture site; run TypeScript validation; run the targeted forbid
 ## 4. Test suites
 
 ```powershell
-npx playwright test tests/unit          # 179 passed, 0 skipped
-npx playwright test tests/integration   #  10 passed
+npx playwright test tests/unit          # 191 passed, 0 skipped
+npx playwright test tests/integration   #  14 passed
 ```
 
-The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 9 final-report tests and 4 CLI-argument tests.
+The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 11 fail-closed healing tests, 9 final-report tests and 6 CLI-argument tests.
 
 The **integration** suite drives real Playwright runs and the local fixture server:
 
@@ -116,6 +116,7 @@ The **integration** suite drives real Playwright runs and the local fixture serv
 | `json-reporter-attribution.spec.ts` (2) | real per-test `PASS`/`FAIL`/`SKIPPED` attribution instead of the exit-code fallback; a missing test path is `playwright-json-no-tests`, not a fallback pass |
 | `jira-defect-dry-run.spec.ts` (1) | a category-A fixture produces a dry-run plan with no network mutation |
 | `qa-pipeline-e2e.spec.ts` (1) | the `qa` pipeline store carries its exploration, so `run-approved` reaches execution |
+| `config-resolution.spec.ts` (4) | `--config` resolves from the repo root, so an explicit foreign cwd still gets the config's video/screenshot settings |
 | `fixtures/selfcheck.spec.ts` (1) | minimal spec used by the artifact-capture tests |
 
 Fixture specs written at test time (deliberately failing) are generated into `tests/integration/fixtures/`, deleted in `afterAll`, gitignored, and guarded by `QA_RUN_GENERATED_FIXTURES` so a leftover from a crashed run is collected but skipped.
@@ -202,9 +203,6 @@ There is no hardcoded `baseURL`. Every spec navigates to an absolute URL, which 
 
 Verified as still open:
 
-- `--config` is passed to Playwright only when `options.storageState` is set, which is semantically unrelated. An explicit `cwd` therefore bypasses `playwright.config.ts` entirely, including the capture settings. Tracked as a TODO in `src/execution-engine.ts`.
-- `healLocator` in `src/locator-healing.ts` takes an **optional** `validate` callback and defaults to fail-open: `validate ? validate(selector) : true` reports `HEALED` when no validation is supplied.
-- `scripts/heal.js` imports `healLocator` but never calls it; `main()` only prints a `BLOCKED` stub. `MAX_HEAL_ATTEMPTS` is documented in earlier revisions but is not read anywhere.
 - Two independent defect-deduplication mechanisms exist and can disagree: a SHA-256 `defectFingerprint` plus a Jira JQL `text ~` search in `src/jira-defects.ts`, and an in-memory `Defect.fingerprint` map with `findByFingerprint` in `src/defect-model.ts`.
 - `npm run lint` is a targeted check for `waitForTimeout`, `nth()` and XPath, **not** ESLint with TypeScript coverage.
 - The PDF renderer is text-based, truncates its content at 5000 characters, and is not a rich paginated layout engine.
@@ -213,7 +211,7 @@ Verified as still open:
 - Smoke and regression discovery are not wired into automatic config-driven runs.
 - No packaged end-to-end demo script exists.
 
-Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; exit-code-fallback per-test attribution; Playwright 1.62 reporter parsing; category-A false positives from locator failures; unrecognized failures defaulting to Jira-eligible; the `qa` pipeline losing its exploration result; the hardcoded `baseURL`.
+Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; exit-code-fallback per-test attribution; Playwright 1.62 reporter parsing; category-A false positives from locator failures; unrecognized failures defaulting to Jira-eligible; the `qa` pipeline losing its exploration result; the hardcoded `baseURL`; `--config` no longer being gated on `storageState`; `healLocator` and `validatedHeal` no longer failing open without a validator; the fabricated `unique`/`visible`/`enabled` ranking flags; the unused `healLocator` import in `scripts/heal.js`.
 
 ## 11. Architecture overview
 
