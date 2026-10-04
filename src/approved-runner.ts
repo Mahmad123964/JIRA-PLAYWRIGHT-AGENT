@@ -103,7 +103,15 @@ export async function runApprovedCases(options: ApprovedRunnerOptions): Promise<
     return { runId, storeId: store.storeId, status: "BLOCKED", approval: { readyCaseIds, excludedCaseIds: store.testCases.filter((item) => !readyCaseIds.includes(item.testCaseId)).map((item) => item.testCaseId), blockedCases }, exploration: { status: exploration.result?.explorationStatus, source: exploration.source, path: exploration.path, reason: exploration.reason }, automation };
   }
 
-  const automation = generateAutomation({ testCases: executable, explorationResult: exploration.result, outputRoot: options.automationRoot || process.cwd(), source: { jiraKey: undefined, sourceReferences: executable.flatMap((item) => item.sources), explorationReferences: executable.flatMap((item) => item.explorationReferences) } });
+  // `outputRoot` is what callers actually pass; `automationRoot` is kept as an
+  // explicit alias. Previously only `automationRoot` was read, so every caller
+  // that passed `outputRoot` silently fell back to process.cwd() and generated
+  // POMs and specs INTO THE PRODUCT TREE. A unit test with module "Auth" and an
+  // example.com exploration therefore overwrote the real
+  // pages/Auth/AuthPage.ts, leaving a spec generated against a fixture port
+  // paired with a POM that navigated somewhere else entirely.
+  const generationRoot = options.automationRoot || options.outputRoot || process.cwd();
+  const automation = generateAutomation({ testCases: executable, explorationResult: exploration.result, outputRoot: generationRoot, source: { jiraKey: undefined, sourceReferences: executable.flatMap((item) => item.sources), explorationReferences: executable.flatMap((item) => item.explorationReferences) } });
   if (automation.status !== "SUCCESS") return { runId, storeId: store.storeId, status: "BLOCKED", approval: { readyCaseIds, excludedCaseIds: store.testCases.filter((item) => !readyCaseIds.includes(item.testCaseId)).map((item) => item.testCaseId), blockedCases }, exploration: { status: exploration.result.explorationStatus, source: exploration.source, path: exploration.path, reason: exploration.reason }, automation };
 
   const specPaths = automation.generated.filter((file) => file.kind === "spec").map((file) => file.path);
