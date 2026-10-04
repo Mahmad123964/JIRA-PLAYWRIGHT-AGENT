@@ -6,7 +6,7 @@ import { classifyFailure, type FailureDiagnosis } from "./failure-classifier";
 import { sanitizeSecrets } from "./document-ingestion";
 import type { ValidatedHealingResult } from "./validated-healing";
 
-export interface ExecutionOptions { runId: string; cwd?: string; browser?: string; project?: string; environment?: string; timeoutMs?: number; outputRoot?: string; storageState?: string; captureArtifacts?: boolean; healingFile?: string; }
+export interface ExecutionOptions { runId: string; cwd?: string; browser?: string; project?: string; environment?: string; timeoutMs?: number; outputRoot?: string; storageState?: string; captureArtifacts?: boolean; healingFile?: string; configPath?: string; }
 export type ExecutionTestStatus = "PASS" | "FAIL" | "BLOCKED" | "SKIPPED";
 /**
  * Where a reported per-test result actually came from. `playwright-json` is a
@@ -158,19 +158,31 @@ export const ALLOWED_TEST_CLI_FLAGS = new Set([
   "--retries", "--workers", "--timeout", "--output", "--grep", "--max-failures",
 ]);
 
+/**
+ * Absolute path to this repository's playwright.config.ts, resolved from the
+ * module's own location rather than the runtime working directory.
+ *
+ * Playwright only auto-discovers a config by walking up from its process cwd.
+ * Because `executePlaywright` runs the runner as a child process whose cwd may
+ * be set explicitly, relying on auto-discovery would silently drop
+ * `use.video` / `use.screenshot` and any other `use` setting. Resolving from the
+ * repo root makes the config independent of `options.cwd`.
+ */
+export function resolveRepoConfigPath(): string {
+  return path.resolve(__dirname, "..", "playwright.config.ts");
+}
+
 export function buildPlaywrightArgs(testPaths: string[], options: ExecutionOptions, cwd: string): string[] {
   const runnerPaths = testPaths.map((testPath) => path.relative(cwd, path.resolve(testPath)).replace(/\\/g, "/"));
   const args = ["test", ...runnerPaths];
   if (options.project) args.push("--project", options.project);
   if (options.browser) args.push("--browser", options.browser);
-  // TODO: --config is gated on options.storageState, which is semantically
-  // unrelated. The runner therefore never passes the config file explicitly
-  // and silently depends on Playwright's implicit auto-discovery from `cwd`.
-  // If `cwd` is ever passed explicitly, playwright.config.ts (and the
-  // use.video/use.screenshot artifact settings it now carries) is bypassed
-  // entirely. Fix: gate --config on the presence of the config file, not on
-  // storageState. Tracked rather than fixed in the --video/--screenshot commit.
-  if (options.storageState) args.push("--config", path.resolve(cwd, "playwright.config.ts"));
+  // Always point the runner at this repository's config, independent of
+  // storageState and of the child process cwd, so the `use` options it carries
+  // (video, screenshot) always apply. Gated on the file existing rather than on
+  // any unrelated option.
+  const configPath = options.configPath || resolveRepoConfigPath();
+  if (fs.existsSync(configPath)) args.push("--config", configPath);
   // --trace is the only artifact-capture option the Playwright CLI accepts.
   if (options.captureArtifacts !== false) args.push("--trace", "retain-on-failure");
   args.push("--reporter", "json");
