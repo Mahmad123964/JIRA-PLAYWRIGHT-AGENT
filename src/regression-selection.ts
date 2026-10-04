@@ -59,13 +59,25 @@ interface StoredRun {
 
 const REPO_RELATIVE_SPEC = /(?:^|[\\/])tests[\\/](generated|api)[\\/].+\.spec\.ts$/;
 
-/** Normalises an absolute-or-relative spec path to a repo-relative posix path. */
+/**
+ * Normalises a spec path to a repo-relative posix path.
+ *
+ * Paths reach us in three shapes: absolute (automation.generated[].path),
+ * repo-relative (the discovery scan), and relative to Playwright's testDir
+ * (execution.tests[].path, e.g. "generated/Demo/TC-1.spec.ts"). The last shape
+ * is the trap: without prefixing "tests/" it would never match a discovered
+ * candidate and every spec would look unrecorded.
+ */
 export function toRepoRelativeSpec(value: string, root: string): string {
   const normalised = value.replace(/\\/g, "/");
-  const absolute = path.isAbsolute(value) ? normalised : path.resolve(root, value).replace(/\\/g, "/");
-  const marker = "/tests/";
-  const index = absolute.lastIndexOf(marker);
-  return index >= 0 ? absolute.slice(index + 1) : absolute;
+  const isAbsolute = path.isAbsolute(value) || /^[A-Za-z]:\//.test(normalised);
+  if (isAbsolute) {
+    const marker = "/tests/";
+    const index = normalised.lastIndexOf(marker);
+    return index >= 0 ? normalised.slice(index + 1) : normalised;
+  }
+  const relative = normalised.replace(/^\.\//, "");
+  return relative.startsWith("tests/") ? relative : `tests/${relative}`;
 }
 
 /** Reads every stored approved-run result under reports/<runId>/. */
