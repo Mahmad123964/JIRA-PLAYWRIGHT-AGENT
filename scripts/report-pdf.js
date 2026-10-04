@@ -39,12 +39,25 @@ function main() {
   const report = JSON.parse(fs.readFileSync(path.resolve(input), "utf8"));
   const sections = report.sections || {};
   const humanReview = sections.humanReview || { count: 0, distinctTests: 0, items: [] };
+  const smoke = sections.smoke;
+  const regression = sections.regression;
+  // Rendered before the large JSON blocks: the PDF text is truncated at 5000
+  // characters, so a suite line placed later would be cut off entirely.
+  const suiteLine = (label, section) => {
+    if (!section) return `${label}: NOT RUN`;
+    const verdict = section.pass ? "" : " (not a pass)";
+    const reason = section.reason ? ` | ${section.reason}` : "";
+    const specs = Array.isArray(section.included) ? ` | specs: ${section.included.length}` : "";
+    return `${label}: ${section.outcome}${verdict}${specs}${reason}`;
+  };
   const lines = [
     "FINAL QA REPORT",
     `Run summary: ${report.runId} | ${report.status} | ${report.environment}`,
-    // Placed immediately after the run summary, before the large JSON blocks:
-    // the PDF text is truncated at 5000 characters, so anything later would be
-    // cut off and these cases would be invisible in the PDF.
+    // Suite verdicts are placed immediately after the run summary, before the
+    // large JSON blocks: the PDF text is truncated at 5000 characters, so
+    // anything later would be cut off and these cases would be invisible.
+    suiteLine("Smoke suite", smoke),
+    suiteLine("Regression suite", regression),
     `NEEDS HUMAN REVIEW: ${humanReview.count} signal(s) across ${humanReview.distinctTests} test(s) (not auto-filed; possible real application defects)`,
     ...(humanReview.items || []).map(
       (item, index) =>

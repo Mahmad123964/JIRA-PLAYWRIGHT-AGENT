@@ -23,6 +23,21 @@ function flag(argv, name) {
     ? argv[i + 1]
     : undefined;
 }
+function readSuiteReport(runId, mode) {
+  // Auto-detects reports/<runId>/<mode>-report.json, written by the smoke and
+  // regression runners. Absent means the suite was not run for this run id,
+  // which is reported as NOT RUN rather than a pass.
+  const file = path.resolve("reports", runId, `${mode}-report.json`);
+  if (!fs.existsSync(file)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    const sections = parsed && parsed.sections;
+    return sections && sections[mode] ? sections[mode] : null;
+  } catch (error) {
+    return { suite: mode, outcome: "UNREADABLE", configured: true, executed: false, reason: `${mode}-report.json could not be parsed: ${error.message}` };
+  }
+}
+
 function main() {
   const argv = process.argv.slice(2);
   const runId = flag(argv, "--run-id");
@@ -33,6 +48,8 @@ function main() {
   const input = JSON.parse(fs.readFileSync(inputPath, "utf8"));
   const report = aggregateFinalReport(runId, input, {
     environment: flag(argv, "--environment"),
+    smoke: readSuiteReport(runId, "smoke"),
+    regression: readSuiteReport(runId, "regression"),
   });
   const reportPath = saveFinalReport(report);
   const pdfPath = path.resolve("reports", runId, "qa-report.pdf");

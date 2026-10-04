@@ -68,6 +68,55 @@ function determineStatus(run: Record<string, unknown>): FinalStatus {
     if (execution?.totals?.blocked || execution?.totals?.skipped) return "PARTIAL";
     return "BLOCKED";
 }
+/**
+ * Normalises a suite payload for the final report.
+ *
+ * A suite that did not run, or that ran with blocked/skipped work, must never
+ * read as a pass. `SKIPPED_NOT_CONFIGURED` is preserved verbatim and `pass` is
+ * true only for a clean SUCCESS outcome, so a reader (or the PDF) cannot mistake
+ * BLOCKED / SKIPPED / SKIPPED_NOT_CONFIGURED for a pass.
+ */
+export interface SuiteSection {
+  suite: string;
+  outcome: string;
+  pass: boolean;
+  configured: boolean;
+  executed: boolean;
+  reason?: string;
+  selectionPath?: string;
+  included?: string[];
+  totals?: Record<string, number>;
+}
+
+const CLEAN_SUITE_OUTCOME = "SUCCESS";
+
+export function normalizeSuiteSection(value: unknown): SuiteSection | null {
+  if (!value || typeof value !== "object") return null;
+  const payload = value as Record<string, unknown>;
+  const outcome = String(payload.outcome || payload.status || "UNKNOWN");
+  return {
+    suite: String(payload.suite || "unknown"),
+    outcome,
+    pass: outcome === CLEAN_SUITE_OUTCOME,
+    configured: payload.configured === true,
+    executed: payload.executed === true,
+    reason: typeof payload.reason === "string" ? payload.reason : undefined,
+    selectionPath: typeof payload.selectionPath === "string" ? payload.selectionPath : undefined,
+    included: Array.isArray(payload.included) ? (payload.included as string[]) : undefined,
+    totals: payload.totals && typeof payload.totals === "object" ? (payload.totals as Record<string, number>) : undefined,
+  };
+}
+
+/** One-line rendering used by both the text report and the PDF. */
+export function describeSuiteSection(section: SuiteSection | null, label: string): string[] {
+  if (!section) return [`${label}: NOT RUN`];
+  const lines = [`${label}: ${section.outcome}${section.pass ? "" : " (not a pass)"}`];
+  if (!section.configured) lines.push(`  reason: ${section.reason || "not configured"}`);
+  if (section.included) lines.push(`  specs: ${section.included.length ? section.included.join(", ") : "none"}`);
+  if (section.totals) lines.push(`  totals: ${JSON.stringify(section.totals)}`);
+  return lines;
+}
+
 export function aggregateFinalReport(runId: string, runResult: Record<string, unknown>, options: { environment?: string; smoke?: unknown; regression?: unknown } = {}): FinalReport {
   const evidence: FinalEvidence[] = [];
   collectEvidence(runResult, evidence);
@@ -111,8 +160,8 @@ export function aggregateFinalReport(runId: string, runResult: Record<string, un
       healing: runResult.healing || [],
       failureClassification: classifications,
       humanReview: collectHumanReview(runResult, execution.failures || []),
-      smoke: options.smoke || null,
-      regression: options.regression || null,
+      smoke: normalizeSuiteSection(options.smoke),
+      regression: normalizeSuiteSection(options.regression),
       failures: execution.failures || [],
       blockers: (runResult.automation as { blocked?: unknown } | undefined)?.blocked || (runResult.approval as { blockedCases?: unknown } | undefined)?.blockedCases || [],
       defects: runResult.defects || null,
@@ -121,4 +170,4 @@ export function aggregateFinalReport(runId: string, runResult: Record<string, un
   };
 }
 export function saveFinalReport(report: FinalReport, outputPath = path.resolve("reports", report.runId, "final-report.json")): string { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); const sanitized = sanitizeSecrets(JSON.stringify(report, null, 2)).sanitized; fs.writeFileSync(outputPath, sanitized, "utf8"); return outputPath; }
-export function finalReportText(report: FinalReport): string { const execution = report.sections.execution as { totals?: unknown } | undefined; const humanReview = report.sections.humanReview as HumanReviewSection | undefined; return ["FINAL QA REPORT", `Run ID: ${report.runId}`, `Status: ${report.status}`, `Environment: ${report.environment}`, `URL: ${report.url || "Not available / not applicable."}`, `Module: ${report.module || "Not available / not applicable."}`, `Scope: ${report.scope || "Not available / not applicable."}`, `Execution: ${JSON.stringify(execution?.totals || {})}`, `Healing entries: ${Array.isArray(report.sections.healing) ? report.sections.healing.length : 0}`, `NEEDS HUMAN REVIEW: ${humanReview?.count ?? 0} signal(s) across ${humanReview?.distinctTests ?? 0} test(s)`, ...(humanReview?.items || []).map((item, index) => `  ${index + 1}. [${item.source}] ${item.test || item.category || "run"} - ${item.reason}`), `Evidence artifacts: ${report.evidence.length}`, `Security: ${report.security.status}`].join("\n"); }
+export function finalReportText(report: FinalReport): string { const execution = report.sections.execution as { totals?: unknown } | undefined; const humanReview = report.sections.humanReview as HumanReviewSection | undefined; return ["FINAL QA REPORT", `Run ID: ${report.runId}`, `Status: ${report.status}`, `Environment: ${report.environment}`, `URL: ${report.url || "Not available / not applicable."}`, `Module: ${report.module || "Not available / not applicable."}`, `Scope: ${report.scope || "Not available / not applicable."}`, `Execution: ${JSON.stringify(execution?.totals || {})}`, `Healing entries: ${Array.isArray(report.sections.healing) ? report.sections.healing.length : 0}`, ...describeSuiteSection(report.sections.smoke as SuiteSection | null, "Smoke suite"), ...describeSuiteSection(report.sections.regression as SuiteSection | null, "Regression suite"), `NEEDS HUMAN REVIEW: ${humanReview?.count ?? 0} signal(s) across ${humanReview?.distinctTests ?? 0} test(s)`, ...(humanReview?.items || []).map((item, index) => `  ${index + 1}. [${item.source}] ${item.test || item.category || "run"} - ${item.reason}`), `Evidence artifacts: ${report.evidence.length}`, `Security: ${report.security.status}`].join("\n"); }
