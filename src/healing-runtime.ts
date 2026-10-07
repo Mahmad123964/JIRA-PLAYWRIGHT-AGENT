@@ -16,7 +16,11 @@ export async function validateObservedCandidate(page: Page, element: DiscoveredE
     const locator = locatorForObservedElement(page, element);
     const count = await locator.count();
     const visible = count === 1 && await locator.isVisible();
-    const enabled = count === 1 ? await locator.isEnabled().catch(() => true) : false;
+    // FAIL CLOSED: if isEnabled() throws, there is no evidence the candidate is
+    // interactable, so it must count as not enabled, not as enabled. The
+    // strict validation gate in validated-healing.ts (count===1 && visible &&
+    // enabled && ...) depends on this to actually fail closed on an error here.
+    const enabled = count === 1 ? await locator.isEnabled().catch(() => false) : false;
     return { count, visible, enabled, role: element.role, name: element.name };
   } catch {
     return { count: 0, visible: false, enabled: false, role: element.role, name: element.name };

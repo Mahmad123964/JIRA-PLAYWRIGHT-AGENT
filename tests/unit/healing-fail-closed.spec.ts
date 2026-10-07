@@ -1,7 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { healLocator, rankHealingCandidates } from "../../src/locator-healing";
 import { validatedHeal } from "../../src/validated-healing";
+import { validateObservedCandidate } from "../../src/healing-runtime";
 import type { DiscoveredElement } from "../../src/browser-explorer";
+import type { Page } from "@playwright/test";
 
 /**
  * Guards the fail-closed contract:
@@ -170,5 +172,27 @@ test.describe("validatedHeal fails closed without a live validator", () => {
     expect(result.outcome).toBe("NOT_HEALED");
     expect(result.reason).toContain("possible real application change");
     expect(result.reason).toContain("HUMAN_REVIEW_REQUIRED");
+  });
+});
+
+test.describe("validateObservedCandidate fails closed on a thrown isEnabled()", () => {
+  function fakePage(isEnabled: () => Promise<boolean>): Page {
+    const locator = { count: async () => 1, isVisible: async () => true, isEnabled };
+    return { getByRole: () => locator } as unknown as Page;
+  }
+
+  test("an isEnabled() error is reported as not enabled, not as enabled", async () => {
+    const page = fakePage(async () => { throw new Error("isEnabled probe failed"); });
+    const validation = await validateObservedCandidate(page, element);
+    expect(validation.enabled).toBe(false);
+    // count/visible are unaffected: only the failed enabled check must fail closed.
+    expect(validation.count).toBe(1);
+    expect(validation.visible).toBe(true);
+  });
+
+  test("a resolving isEnabled() still reports its real value", async () => {
+    const page = fakePage(async () => true);
+    const validation = await validateObservedCandidate(page, element);
+    expect(validation.enabled).toBe(true);
   });
 });
