@@ -121,22 +121,23 @@ Serve the local fixture site; run TypeScript validation; run the targeted forbid
 ## 4. Test suites
 
 ```powershell
-npx playwright test tests/unit          # 214 passed, 0 failed, 0 skipped
-npx playwright test tests/integration   #  19 passed
+npx playwright test tests/unit          # 234 passed, 0 failed, 0 skipped
+npx playwright test tests/integration   #  20 passed
 ```
 
-The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 11 fail-closed healing tests, 9 final-report tests, 6 CLI-argument tests and 22 Phase 6 smoke/regression contract tests.
+The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 13 fail-closed healing tests (locator healing plus `validateObservedCandidate`'s `isEnabled()` fail-closed contract), 15 final-report tests (including the raw-data secret-scan contract), 6 CLI-argument tests, 12 spec/POM namespacing and content-fingerprint tests, and 22 Phase 6 smoke/regression contract tests.
 
 The **integration** suite drives real Playwright runs and the local fixture server:
 
 | File | Covers |
 | --- | --- |
 | `approved-run-healing.spec.ts` (3) | same-page healing → `PASS_AFTER_HEALING`; a real assertion failure → Jira dry-run defect; a removed element → `NOT_HEALED` + human review |
-| `capture-artifacts.spec.ts` (2) | default artifact capture runs a real spec; `captureArtifacts: false` path |
+| `capture-artifacts.spec.ts` (3) | default artifact capture runs a real spec; `captureArtifacts: false` path; two concurrent nested runs sharing a runId get isolated `--output` directories |
 | `json-reporter-attribution.spec.ts` (2) | real per-test `PASS`/`FAIL`/`SKIPPED` attribution instead of the exit-code fallback; a missing test path is `playwright-json-no-tests`, not a fallback pass |
 | `jira-defect-dry-run.spec.ts` (1) | a category-A fixture produces a dry-run plan with no network mutation |
 | `qa-pipeline-e2e.spec.ts` (1) | the `qa` pipeline store carries its exploration, so `run-approved` reaches execution |
 | `config-resolution.spec.ts` (4) | `--config` resolves from the repo root, so an explicit foreign cwd still gets the config's video/screenshot settings |
+| `phase6-suites.spec.ts` (5) | smoke config resolves to real specs on disk; regression selection over real repository state; fallback-sourced results never establish a baseline; an empty selection is not configured, not a pass; the final report merges both suite sections |
 | `fixtures/selfcheck.spec.ts` (1) | minimal spec used by the artifact-capture tests |
 
 Fixture specs written at test time (deliberately failing) are generated into `tests/integration/fixtures/`, deleted in `afterAll`, gitignored, and guarded by `QA_RUN_GENERATED_FIXTURES` so a leftover from a crashed run is collected but skipped.
@@ -222,16 +223,17 @@ There is no hardcoded `baseURL`. Every spec navigates to an absolute URL, which 
 
 Verified as still open:
 
-- Two independent defect-deduplication mechanisms exist and can disagree: a SHA-256 `defectFingerprint` plus a Jira JQL `text ~` search in `src/jira-defects.ts`, and an in-memory `Defect.fingerprint` map with `findByFingerprint` in `src/defect-model.ts`.
-- Generated specs and Page Objects are keyed by module name alone (`tests/generated/<Module>/<TC-ID>.spec.ts`, `pages/<Module>/<Module>Page.ts`), so a later run **overwrites** an earlier run's file while the stored PASS baseline still refers to the earlier content. A regression baseline therefore has no content fingerprint and can select a spec that has since been regenerated. Observed in practice: `tests/generated/Auth/TC-AUTH-001.spec.ts` selected against a PASS baseline, then failed because its regenerated POM navigated to `https://example.com` while the spec body referenced fixture elements on another port.
+- Two independent defect-deduplication mechanisms exist and can disagree: a SHA-256 `defectFingerprint` plus a Jira JQL `text ~` search in `src/jira-defects.ts`, and an in-memory `Defect.fingerprint` map with `findByFingerprint` in `src/defect-model.ts`. In practice `src/defect-model.ts` has no importer anywhere in `src/` today, so only the `jira-defects.ts` path is ever exercised by a live run — but the second mechanism is live, reachable code, not deleted, so wiring it in later without reconciling the two fingerprint schemes would reintroduce the disagreement.
+- Several adapters are genuinely implemented but **not wired into the requirement pipeline**: `src/notion-ingestion.ts`, `src/slack-ingestion.ts`, `src/github-ingestion.ts`, and `src/jira.ts`/`src/jira-helper.ts` all make real HTTP calls and have real tests, but `src/source-adapters.ts` unconditionally stubs jira/notion/slack/github to `UNAVAILABLE` regardless of configuration, and none of `src/requirement-sources.ts` or `src/qa-pipeline.ts` calls the real adapters. They are reachable only via standalone `scripts/ingest-notion.js` / `scripts/ingest-slack.js` / `scripts/ingest-github.js`, which are undocumented here and untested as pipeline stages.
 - Regression and smoke specs that target a live application require that target to be running; `tests/generated/**` specs generally point at the local demo fixture on a specific port, and the port is recorded in the generated file rather than configuration.
 - `npm run lint` is a targeted check for `waitForTimeout`, `nth()` and XPath, **not** ESLint with TypeScript coverage.
 - The PDF renderer is text-based, truncates its content at 5000 characters, and is not a rich paginated layout engine.
-- Jira real creation is off by default and requires an explicitly supplied Jira client plus `createReal: true`; no live creation was verified.
+- Jira real creation is off by default and requires an explicitly supplied Jira client plus `createReal: true` passed to `createDefect()` in `src/jira-defects.ts`; no live creation was verified, and there is no CLI flag for it today.
 - Evidence paths are checked; a missing artifact is reported as missing, not as proof of a passing run.
 - No packaged end-to-end demo script exists.
+- `AGENTS.md` describes an earlier Jira-ticket-centric workflow that this pipeline no longer implements (dynamic Jira scope discovery, a per-ticket lifecycle, `<ISSUE-KEY>.spec.ts` naming, a per-ticket authentication summary block). It now carries a SUPERSEDED banner pointing here and to `CLAUDE.md`, but the body text itself is kept as historical record and was not rewritten.
 
-Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; exit-code-fallback per-test attribution; Playwright 1.62 reporter parsing; category-A false positives from locator failures; unrecognized failures defaulting to Jira-eligible; the `qa` pipeline losing its exploration result; the hardcoded `baseURL`; `--config` no longer being gated on `storageState`; `healLocator` and `validatedHeal` no longer failing open without a validator; the fabricated `unique`/`visible`/`enabled` ranking flags; the unused `healLocator` import in `scripts/heal.js`.
+Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; exit-code-fallback per-test attribution; Playwright 1.62 reporter parsing; category-A false positives from locator failures; unrecognized failures defaulting to Jira-eligible; the `qa` pipeline losing its exploration result; the hardcoded `baseURL`; `--config` no longer being gated on `storageState`; `healLocator` and `validatedHeal` no longer failing open without a validator; the fabricated `unique`/`visible`/`enabled` ranking flags; the unused `healLocator` import in `scripts/heal.js`; generated specs and Page Objects being keyed by module name alone (now namespaced per approval store, and content-fingerprinted so a regenerated file can never silently inherit an older PASS baseline); the integration suite flaking under default parallel workers (nested Playwright runs now each get a private, salted `--output` directory instead of sharing Playwright's default `test-results/`, which it wipes at startup); `src/final-report.ts`'s secret scan running on text that had already been sanitized, which meant it could never find a real secret in the raw run data (it now scans the raw data first and reports `MASKED <n>` or `FAIL` rather than always `PASS`); `src/healing-runtime.ts`'s `validateObservedCandidate` treating a thrown `isEnabled()` as `enabled: true` instead of failing closed.
 
 ## 11. Architecture overview
 
