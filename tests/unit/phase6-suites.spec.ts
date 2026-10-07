@@ -70,6 +70,13 @@ test.describe("smoke configuration", () => {
     const config = loadSmokeConfig(process.cwd());
     expect(config.configured).toBe(true);
     for (const declared of config.paths) expect(fs.existsSync(path.resolve(declared))).toBe(true);
+    // config.paths is already filtered to files that exist, so the loop above
+    // can never fail on a stale path -- it is checking loadSmokeConfig's own
+    // filtering, not the repository's actual qa.config.json content. This
+    // assertion is the one that actually fails if a declared smoke path is
+    // moved or renamed without updating qa.config.json: it reads the real
+    // list of declared-but-absent paths instead of the already-filtered one.
+    expect(config.missing).toEqual([]);
   });
 });
 
