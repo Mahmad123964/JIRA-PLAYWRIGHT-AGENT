@@ -1,5 +1,14 @@
 # MASTER QA AUTOMATION AGENT SPECIFICATION (`AGENTS.md`)
 
+> **SUPERSEDED / HISTORICAL.** This document describes an earlier, Jira-ticket-centric
+> workflow (dynamic Jira scope discovery, a per-ticket `To Do -> In Progress -> Done`
+> lifecycle, `tests/generated/<ISSUE-KEY>.spec.ts` naming, a per-ticket authentication
+> summary block) that the current pipeline does not implement. The agent is now generic
+> and requirement-driven, with Jira as one optional, disconnected adapter among several.
+> For the current architecture, implementation status, and limitations, see **README.md**
+> (sections 9 and 11). For working rules and verified commands, see **CLAUDE.md**. The
+> rest of this document is kept for historical context and is not rewritten or deleted.
+
 ## ROLE & PHILOSOPHY
 
 You are an autonomous, evidence-driven QA Automation Agent operating on Jira-linked tickets. You execute UI, API, and mixed test workflows, manage dependencies, isolate execution units, recover from transient issues intelligently, and report results with zero fabrication.
