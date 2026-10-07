@@ -1,15 +1,44 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const typescript = require("typescript");
+require.extensions[".ts"] = function (module, filename) {
+  const out = typescript.transpileModule(fs.readFileSync(filename, "utf8"), {
+    compilerOptions: {
+      module: typescript.ModuleKind.CommonJS,
+      target: typescript.ScriptTarget.ES2022,
+      esModuleInterop: true,
+    },
+    fileName: filename,
+  }).outputText;
+  module._compile(out, filename);
+};
+const { humanReviewLabel } = require(
+  path.join(__dirname, "../src/final-report.ts"),
+);
 function escape(value) {
   return String(value)
-    .replace(/\\/g, "\\")
+    .replace(/\\/g, "\\\\")
     .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)")
-    .replace(/\r?\n/g, " ");
+    .replace(/\)/g, "\\)");
 }
-function makePdf(text) {
-  const stream = `BT /F1 10 Tf 50 760 Td (${escape(text.slice(0, 5000))}) Tj ET`;
+function makePdf(lines) {
+  // Each logical line gets its own row via the `'` (move-to-next-line-and-show)
+  // operator with an explicit leading (TL), instead of joining every line with
+  // a space into one giant Tj string on one row. The old single-row form ran
+  // off the page's right edge (MediaBox width 612pt) after roughly 100
+  // characters: a PDF reader clips text at the page boundary, so nearly the
+  // entire report -- including NEEDS HUMAN REVIEW and everything after it --
+  // was invisible both on screen and to text extraction, despite being present
+  // in the content stream's raw bytes. The total-character truncation (still
+  // 5000, now applied across the joined lines before re-splitting) is
+  // unchanged; only the layout is fixed.
+  const renderLines = lines.join("\n").slice(0, 5000).split("\n");
+  const leading = 14;
+  const streamParts = ["BT", "/F1 10 Tf", "50 760 Td", `${leading} TL`];
+  for (const line of renderLines) streamParts.push(`(${escape(line)}) '`);
+  streamParts.push("ET");
+  const stream = streamParts.join("\n");
   const objects = [
     `1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`,
     `2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`,
@@ -58,7 +87,12 @@ function main() {
     // anything later would be cut off and these cases would be invisible.
     suiteLine("Smoke suite", smoke),
     suiteLine("Regression suite", regression),
-    `NEEDS HUMAN REVIEW: ${humanReview.count} finding(s) across ${humanReview.distinctTests} failing test(s) (not auto-filed; possible real application defects)`,
+    // Same sentence the JSON report's finalReportText() renders -- never
+    // rebuilt by hand here. Reconstructing it inline previously produced
+    // "1 finding(s) across 0 failing test(s)" for a run-level finding that
+    // could not be attributed to a single test, instead of the grammatical,
+    // explicit run-level phrasing humanReviewLabel() already handles.
+    humanReviewLabel(humanReview),
     ...(humanReview.items || []).map(
       (item, index) =>
         `  ${index + 1}. [${item.source}] ${item.test || item.category || "run"} - ${item.reason}`,
@@ -83,7 +117,7 @@ function main() {
   ];
   fs.writeFileSync(
     output,
-    makePdf(lines.join("\n")),
+    makePdf(lines),
   );
   console.log(
     JSON.stringify(

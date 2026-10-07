@@ -1,7 +1,26 @@
 import { test, expect } from "@playwright/test";
 import fs from "fs";
 import path from "path";
+import { PDFParse } from "pdf-parse";
 import { aggregateFinalReport, saveFinalReport, finalReportText, collectHumanReview, humanReviewLabel } from "../../src/final-report";
+
+/** Renders runResult through the real pipeline and extracts the PDF's text. */
+async function renderPdfText(runId: string, result: Record<string, unknown>): Promise<{ report: ReturnType<typeof aggregateFinalReport>; pdfText: string }> {
+    const report = aggregateFinalReport(runId, result);
+    const reportPath = saveFinalReport(report, `reports/${runId}/final-report-test.json`);
+    const pdfPath = path.resolve(`reports/${runId}/qa-report-test.pdf`);
+    const { main } = require("../../scripts/report-pdf.js");
+    const originalArgv = process.argv;
+    process.argv = [originalArgv[0], originalArgv[1], reportPath, pdfPath];
+    try {
+        main();
+    } finally {
+        process.argv = originalArgv;
+    }
+    const parser = new PDFParse({ data: fs.readFileSync(pdfPath) });
+    const textData = await parser.getText();
+    return { report, pdfText: (textData.pages || []).map((p) => p.text || "").join("\n") };
+}
 
 const REMOVED_RATIONALE = "The locator did not resolve to the intended element, so the test never reached the assertion and no contract mismatch can be proven. A removed or renamed element is a possible real application change: validated-healing flags it as HUMAN_REVIEW_REQUIRED for a human to judge, and it is not auto-filed as a defect.";
 
@@ -172,4 +191,51 @@ test("the generated PDF never contains the planted secret text", () => {
     }
     const pdfBytes = fs.readFileSync(pdfPath);
     expect(pdfBytes.includes(Buffer.from(PLANTED_FAKE_SECRET))).toBe(false);
+});
+
+// report-pdf.js must render the same sentence as humanReviewLabel(), never a
+// hand-rebuilt one. Previously it reconstructed
+// "${count} finding(s) across ${distinctTests} failing test(s)" by hand,
+// which read as "1 finding(s) across 0 failing test(s)" for a run-level
+// finding -- nonsensical, and silently out of sync with the JSON report's own
+// finalReportText() rendering of the identical section.
+
+test("PDF and JSON agree: zero signals", async () => {
+    const { report, pdfText } = await renderPdfText("human-review-none", runResult());
+    const expected = humanReviewLabel(report.sections.humanReview as ReturnType<typeof collectHumanReview>);
+    expect(expected).toBe("NEEDS HUMAN REVIEW: none");
+    expect(finalReportText(report)).toContain(expected);
+    expect(pdfText).toContain(expected);
+});
+
+test("PDF and JSON agree: a signal attributed to a single failing test", async () => {
+    const { report, pdfText } = await renderPdfText("human-review-attributed", removedElementRun());
+    const humanReview = report.sections.humanReview as ReturnType<typeof collectHumanReview>;
+    const expected = humanReviewLabel(humanReview);
+    expect(humanReview.distinctTests).toBe(1);
+    expect(expected).toContain("across 1 failing test");
+    expect(finalReportText(report)).toContain(expected);
+    expect(pdfText).toContain(expected);
+});
+
+test("PDF and JSON agree: a run-level signal with distinctTests = 0, and the real PDF text is shown", async () => {
+    const runLevelResult = {
+        runId: "human-review-run-level",
+        status: "FAILED",
+        environment: "test",
+        // Two failing tests, so collectHumanReview cannot attribute the single
+        // healing finding to either one -- this is what actually produces
+        // distinctTests === 0 with count > 0.
+        execution: { totals: { total: 2, passed: 0, failed: 2, blocked: 0, skipped: 0 }, failures: [{ path: "a.spec.ts" }, { path: "b.spec.ts" }] },
+        healing: [{ outcome: "NOT_HEALED", attempts: [], reason: "No candidate passed strict live validation and original assertion re-execution; HUMAN_REVIEW_REQUIRED" }],
+    };
+    const { report, pdfText } = await renderPdfText("human-review-run-level", runLevelResult);
+    const humanReview = report.sections.humanReview as ReturnType<typeof collectHumanReview>;
+    const expected = humanReviewLabel(humanReview);
+    expect(humanReview.count).toBe(1);
+    expect(humanReview.distinctTests).toBe(0);
+    expect(expected).toBe("NEEDS HUMAN REVIEW: 1 finding (run-level; no single failing test could be attributed)");
+    expect(finalReportText(report)).toContain(expected);
+    expect(pdfText).toContain(expected);
+    console.log("Real PDF text (run-level case):\n" + pdfText);
 });
