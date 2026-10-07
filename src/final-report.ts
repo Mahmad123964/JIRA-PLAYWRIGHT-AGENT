@@ -138,8 +138,29 @@ export function describeSuiteSection(section: SuiteSection | null, label: string
 export function aggregateFinalReport(runId: string, runResult: Record<string, unknown>, options: { environment?: string; smoke?: unknown; regression?: unknown } = {}): FinalReport {
   const evidence: FinalEvidence[] = [];
   collectEvidence(runResult, evidence);
-  const sanitized = sanitizeSecrets(JSON.stringify(runResult));
-  const security = scanSecrets([{ path: `reports/${runId}/final-report.json`, content: sanitized.sanitized }]);
+  // Scan the RAW run data in memory, before any sanitizing. Scanning
+  // already-masked text (the previous behaviour) meant the scan ran on
+  // content that had just had every secret pattern stripped out of it, so it
+  // could never find what the masking step had already redacted -- a real
+  // secret in runResult always read back as a clean PASS. The raw text below
+  // is never written to disk; only sanitizeSecrets' output is persisted, by
+  // saveFinalReport.
+  const reportPath = `reports/${runId}/final-report.json`;
+  const rawReportText = JSON.stringify(runResult);
+  const rawScan = scanSecrets([{ path: reportPath, content: rawReportText }]);
+  // Independently verify that sanitizing the SAME raw text actually removes
+  // what the raw scan found, rather than assuming the masking regexes are
+  // complete. This is not the self-blinding bug: it is scanning the masker's
+  // own output to confirm the fix works, with the verdict already recorded
+  // from the raw pass above.
+  const sanitizedReportText = sanitizeSecrets(rawReportText).sanitized;
+  const leaked = rawScan.maskedCount > 0 && scanSecrets([{ path: reportPath, content: sanitizedReportText }]).maskedCount > 0;
+  const security: SecretScanResult = {
+    status: leaked ? "FAIL" : rawScan.maskedCount > 0 ? `MASKED ${rawScan.maskedCount}` : "PASS",
+    maskedCount: rawScan.maskedCount,
+    findings: rawScan.findings,
+    scannedFiles: rawScan.scannedFiles,
+  };
   type Exec = { tests?: Array<{ path?: string; status?: string }>; totals?: unknown; failures?: unknown[] };
   type Case = { testCaseId?: string; sourceRequirements?: string[]; steps?: Array<{ expectedAssertion?: unknown; needsHumanInput?: string }> };
   const execution = (runResult.execution || {}) as Exec;

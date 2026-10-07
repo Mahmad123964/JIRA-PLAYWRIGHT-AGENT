@@ -3,7 +3,15 @@ import path from "path";
 import { sanitizeSecrets, detectPromptInjections } from "./document-ingestion";
 
 export interface AuditEvent { timestamp: string; runId: string; phase: string; action: string; source?: string; inputReference?: string; outputReference?: string; decision?: string; reason?: string; actor?: string; }
-export interface SecretScanResult { status: "PASS" | "FAIL"; maskedCount: number; findings: string[]; scannedFiles: string[]; }
+/**
+ * "PASS": the scanned content contained no secret pattern.
+ * `MASKED ${n}`: the content contained n secret(s), all of which were caught
+ * and masked before anything was persisted -- the masking worked.
+ * "FAIL": the content contained a secret that survived sanitization, i.e. the
+ * masking regexes did not fully remove what the raw scan found. This is the
+ * one case that means a secret could reach a persisted artifact.
+ */
+export interface SecretScanResult { status: "PASS" | "FAIL" | `MASKED ${number}`; maskedCount: number; findings: string[]; scannedFiles: string[]; }
 
 export class AuditTrail {
   readonly events: AuditEvent[] = [];

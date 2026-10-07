@@ -113,3 +113,63 @@ test("an unclassified failure is flagged for human review rather than lost", () 
     expect(section.count).toBe(1);
     expect(section.items[0].source).toBe("failure-classification");
 });
+
+// Secret scan self-blinding fix (final-report.ts aggregateFinalReport).
+//
+// Before the fix, the scan ran on text that had ALREADY been sanitized, so it
+// could never find what the masking step had just redacted -- a real secret
+// in runResult always read back as a clean PASS. The planted secret below is
+// clearly fake (it matches sanitizeSecrets' Jira-API-token pattern) but
+// exercises the exact code path a genuine leaked token would take.
+const PLANTED_FAKE_SECRET = "ATATT3xFfGF0rZ1234567890abcdefFAKE";
+
+function runResultWithPlantedSecret() {
+    return {
+        ...runResult(),
+        execution: {
+            ...runResult().execution,
+            failures: [{
+                path: "generated/Demo/TC-DEMO.spec.ts",
+                diagnosis: { category: "A. REAL APPLICATION DEFECT" },
+                error: `Request failed. JIRA_API_TOKEN=${PLANTED_FAKE_SECRET}`,
+            }],
+        },
+    };
+}
+
+test("a clean run with no secret reports PASS", () => {
+    const report = aggregateFinalReport("final-test", runResult());
+    expect(report.security.status).toBe("PASS");
+    expect(report.security.maskedCount).toBe(0);
+});
+
+test("a planted secret in raw run data is detected and reported as MASKED, not PASS", () => {
+    const report = aggregateFinalReport("secret-test", runResultWithPlantedSecret());
+    expect(report.security.status).not.toBe("PASS");
+    expect(report.security.status).toMatch(/^MASKED \d+$/);
+    expect(report.security.maskedCount).toBeGreaterThan(0);
+});
+
+test("the persisted final-report.json never contains the planted secret text", () => {
+    const report = aggregateFinalReport("secret-test", runResultWithPlantedSecret());
+    const output = saveFinalReport(report, "reports/secret-test/final-report-test.json");
+    const persisted = fs.readFileSync(output, "utf8");
+    expect(persisted).not.toContain(PLANTED_FAKE_SECRET);
+    expect(report.security.status).not.toBe("PASS");
+});
+
+test("the generated PDF never contains the planted secret text", () => {
+    const report = aggregateFinalReport("secret-test", runResultWithPlantedSecret());
+    const reportPath = saveFinalReport(report, "reports/secret-test/final-report-test.json");
+    const pdfPath = path.resolve("reports/secret-test/qa-report-test.pdf");
+    const { main } = require("../../scripts/report-pdf.js");
+    const originalArgv = process.argv;
+    process.argv = [originalArgv[0], originalArgv[1], reportPath, pdfPath];
+    try {
+        main();
+    } finally {
+        process.argv = originalArgv;
+    }
+    const pdfBytes = fs.readFileSync(pdfPath);
+    expect(pdfBytes.includes(Buffer.from(PLANTED_FAKE_SECRET))).toBe(false);
+});
