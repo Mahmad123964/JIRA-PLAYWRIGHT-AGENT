@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { spawn } from "child_process";
 import { EvidenceManager } from "./evidence-engine";
 import { classifyFailure, type FailureDiagnosis } from "./failure-classifier";
@@ -227,7 +228,16 @@ export function buildExecutionTests(input: { parsedJson: PlaywrightJsonParse; te
 export async function executePlaywright(testPaths: string[], options: ExecutionOptions): Promise<ExecutionResult> {
   const cwd = options.cwd || process.cwd(); const outputRoot = options.outputRoot || path.resolve("test-results", options.runId); const evidence = new EvidenceManager(options.runId, outputRoot);
   const cliPath = require.resolve("@playwright/test/cli");
-  const args = [cliPath, ...buildPlaywrightArgs(testPaths, options, cwd)];
+  // Every nested Playwright run gets its own --output directory, salted with
+  // the process id, a high-resolution timestamp and random bytes. Without
+  // this, a caller that omits outputDir falls back to Playwright's own
+  // default ("<cwd>/test-results"), which Playwright wipes at startup -- so
+  // two nested runs executing concurrently (e.g. two integration tests under
+  // the default multi-worker suite) can delete each other's artifacts
+  // mid-run. The salt makes this collision-free even if the same runId is
+  // reused by two concurrent callers.
+  const resolvedOutputDir = path.resolve(options.outputDir || path.join(outputRoot, `pw-output-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`));
+  const args = [cliPath, ...buildPlaywrightArgs(testPaths, { ...options, outputDir: resolvedOutputDir }, cwd)];
   const command = `${process.execPath} ${args.join(" ")}`; const started = Date.now();
   const childEnv = { ...process.env, ...(options.healingFile ? { QA_HEALING_FILE: path.resolve(options.healingFile) } : {}) };
   const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => { const child = spawn(process.execPath, args, { cwd, shell: false, env: childEnv }); let stdout = ""; let stderr = ""; child.stdout.on("data", (d) => { stdout += d.toString(); }); child.stderr.on("data", (d) => { stderr += d.toString(); }); child.on("close", (code) => resolve({ code, stdout, stderr })); child.on("error", (error) => resolve({ code: null, stdout, stderr: `${stderr}${error.message}` })); });
@@ -254,7 +264,7 @@ export async function executePlaywright(testPaths: string[], options: ExecutionO
   });
   const statusCounts = tests.reduce((counts, item) => { counts[item.status.toLowerCase() as "pass" | "fail" | "blocked" | "skipped"]++; return counts; }, { pass: 0, fail: 0, blocked: 0, skipped: 0 });
   evidence.addText("runner-log", "runner.log", `${result.stdout}\n${result.stderr}`);
-  const artifactRoot = path.resolve(cwd, "test-results");
+  const artifactRoot = resolvedOutputDir;
   if (fs.existsSync(artifactRoot)) {
     const collect = (directory: string): void => {
       for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {

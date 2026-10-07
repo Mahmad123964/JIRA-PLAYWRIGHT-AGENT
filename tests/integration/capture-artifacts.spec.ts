@@ -47,3 +47,36 @@ test("captureArtifacts false also executes cleanly", async () => {
   expect(result.tests[0].source).toBe("playwright-json");
   expect(result.tests[0].status).toBe("PASS");
 });
+
+/**
+ * Regression guard for shared test-results/ clobbering concurrent nested runs.
+ *
+ * Before this fix, a caller that omitted outputDir fell back to Playwright's
+ * own default output directory ("<cwd>/test-results"), which Playwright wipes
+ * at startup. Two such nested runs executing concurrently -- exactly what
+ * happens under the integration suite's default multi-worker execution --
+ * could delete each other's artifacts mid-run. The engine now always resolves
+ * a private, salted --output directory per call, even when every caller uses
+ * the SAME runId, so concurrent runs can never share one.
+ */
+test("concurrent nested runs with the same runId get isolated output directories", async () => {
+  const [first, second] = await Promise.all([
+    executePlaywright(["tests/integration/fixtures/selfcheck.spec.ts"], { runId: "same-run-id" }),
+    executePlaywright(["tests/integration/fixtures/selfcheck.spec.ts"], { runId: "same-run-id" }),
+  ]);
+
+  const outputDirOf = (command: string): string => {
+    const match = command.match(/--output\s+(\S+)/);
+    if (!match) throw new Error(`--output flag not found in command: ${command}`);
+    return match[1];
+  };
+
+  const firstOutputDir = outputDirOf(first.command);
+  const secondOutputDir = outputDirOf(second.command);
+
+  expect(firstOutputDir).not.toBe(secondOutputDir);
+  expect(first.exitCode).toBe(0);
+  expect(second.exitCode).toBe(0);
+  expect(first.tests[0].status).toBe("PASS");
+  expect(second.tests[0].status).toBe("PASS");
+});
