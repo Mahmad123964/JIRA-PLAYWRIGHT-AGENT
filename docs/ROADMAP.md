@@ -16,7 +16,7 @@ PARTIAL / NOT STARTED table (section 9) is the source of truth.
 | 6 | Smoke and regression suites | IMPLEMENTED (`07a76b7`, `d044ff8`, `4dea498`, `a1e0b48`, `2a155fa`, `3bf8e37`, `dd6a429`, `97ab13e`, `7e48596`) |
 | 6b | Artifact collision / namespacing, content-fingerprint hashes, secret-scan self-blinding fix, nested-run output-directory isolation, healing fail-closed (`isEnabled`) fix, and an interim PDF layout fix later superseded by Phase 6c | IMPLEMENTED (`017f410`, `48e37f5`, `3b3263d`, `e0ddfdc`, `7b63338`, `04f4cd9`, `21109d1`, `264c775`) |
 | 6c | PDF report demo-ready: rendered from HTML (`src/report-html.ts`) via Playwright `page.pdf()` instead of a hand-rolled PDF stream -- real tables, no 5000-character cut, natural pagination; verified by rendering a real 7-page demo-fixture report to images | IMPLEMENTED (`f0a4abe`) |
-| 7 | End-to-end demo on the local fixture | NOT STARTED |
+| 7 | End-to-end demo on the local fixture | IMPLEMENTED (`a5a10e1`, `3b62693`) |
 | 8 | QA test-case skill integration | NOT STARTED |
 | 9 | Platform adapters and target profiles | NOT STARTED |
 | 10 | Full report (PDF via `page.pdf()`, Word, Notion) | NOT STARTED |
@@ -27,11 +27,15 @@ PARTIAL / NOT STARTED table (section 9) is the source of truth.
 
 ### Phase 7 detail
 
-End-to-end demo on the local fixture, in one run: a passing case; a broken locator
-healed to `PASS_AFTER_HEALING`; a removed element stays `FAIL` and appears in Needs
-human review; a real assertion mismatch is classified A and shown as a `WOULD_CREATE`
-dry-run. Scripted approval is DEMO ONLY. The run is idempotent, and every spec/POM path
-is unique.
+`npm run demo`, no flags, against `fixtures/demo-site`. Produces, every run: a
+passing case; a broken locator healed to `PASS_AFTER_HEALING`; a removed element
+that stays `FAIL` and appears in Needs human review; a real assertion mismatch
+classified A and shown as a `WOULD_CREATE` dry-run. Scripted approval is DEMO
+ONLY (`scripts/demo.js` only, never the production pipeline). The run is
+idempotent (verified: two consecutive runs produce identical outcomes), every
+spec/POM path is unique (existing Phase 6b namespacing), and the demo cleans up
+its own generated files afterward. Visually verified: rendered page 1 and the
+last page of a real 7-page demo report to images.
 
 ### Phase 9 detail
 
