@@ -22,6 +22,7 @@
     "qa": "node scripts/qa.js",
     "demo-site": "node fixtures/demo-site/server.js",
     "demo-approve": "node scripts/demo-approve.js",
+    "demo": "node scripts/demo.js",
     "typecheck": "tsc --noEmit",
     "lint": "node scripts/lint.js"
   },
