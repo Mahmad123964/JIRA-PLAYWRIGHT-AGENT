@@ -1,5 +1,6 @@
 import type { FinalReport, HumanReviewSection, SuiteSection } from "./final-report";
 import { humanReviewLabel, describeSuiteSection } from "./final-report";
+import { stripAnsi } from "./failure-classifier";
 
 /**
  * Renders the PDF report as HTML from the same FinalReport object
@@ -18,7 +19,11 @@ const FAILURE_CATEGORIES = [
 ] as const;
 
 function esc(value: unknown): string {
-  return String(value ?? "")
+  // Strip ANSI color-code escape sequences before HTML-escaping, so captured
+  // terminal error text (e.g. the Results table's Error column) never renders
+  // the raw escape bytes as garbled text. Applied here, the single choke point
+  // every piece of rendered text passes through, so it covers every section.
+  return stripAnsi(String(value ?? ""))
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

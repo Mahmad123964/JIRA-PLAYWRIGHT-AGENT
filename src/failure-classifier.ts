@@ -10,6 +10,11 @@ const CATEGORY_E: FailureCategory = "E. BLOCKED / MISSING REQUIREMENT";
 
 const ANSI_ESCAPE = /\u001b\[[0-9;]*m/g;
 
+/** Strips ANSI color-code escape sequences, e.g. from a captured terminal error string. */
+export function stripAnsi(value: string): string {
+  return String(value || "").replace(ANSI_ESCAPE, "");
+}
+
 /**
  * A Playwright error payload is: message head, then an optional "Locator:" /
  * "Expected:" / "Received:" block, then "Call log:", then a code frame of the

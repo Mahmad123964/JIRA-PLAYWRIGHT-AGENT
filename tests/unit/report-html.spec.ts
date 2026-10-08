@@ -91,3 +91,22 @@ test("there is no length truncation in the renderer itself", () => {
     const html = renderReportHtml(report);
     expect(html).toContain(longError);
 });
+
+// Real Playwright error text, captured verbatim from a run of
+// `npm run demo`'s TC-DEMO-DEFECT case (reports/<runId>/approved-run-result.json,
+// execution.tests[].error) -- not a synthetic approximation of ANSI codes.
+const REAL_ANSI_ERROR = "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('heading', { name: 'Welcome back' })\nExpected substring: \u001b[32m\"Wrong heading\"\u001b[39m\nReceived string:    \u001b[31m\"Welcome back\"\u001b[39m";
+
+test("ANSI color-code escape sequences are stripped from rendered text", () => {
+    const result = baseRunResult();
+    (result.execution.tests as Array<Record<string, unknown>>)[2].error = REAL_ANSI_ERROR;
+    const report = aggregateFinalReport("html-test", result);
+    const html = renderReportHtml(report);
+    // The raw escape bytes must be gone...
+    expect(html).not.toContain("\u001b[");
+    // ...and the real message text survives intact (quotes are HTML-escaped
+    // by the same esc() pass, same as any other rendered text).
+    expect(html).toContain("expect(locator).toContainText(expected) failed");
+    expect(html).toContain("Expected substring: &quot;Wrong heading&quot;");
+    expect(html).toContain("Received string:    &quot;Welcome back&quot;");
+});
