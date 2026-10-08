@@ -118,11 +118,30 @@ npm run lint
 ```
 Serve the local fixture site; run TypeScript validation; run the targeted forbidden-pattern check. The fixture's scripted approval helper is demo-only, not a production approval path.
 
+### Run the demo
+
+```powershell
+npm run demo
+```
+
+One command, no flags. Runs the full chain against `fixtures/demo-site`: starts the fixture server, explores it, generates four test cases, runs a scripted `DEMO ONLY` approval (`scripts/demo.js` only -- this never runs in the production pipeline; `src/qa-pipeline.ts` still stops at the human approval gate), executes them, heals, classifies, runs smoke and regression, aggregates the final JSON report and PDF, and prints a console summary table (case, status, category, healing outcome, defect dry-run). No real Jira issue is ever created.
+
+The demo produces, on every run, by design:
+
+| Case | What it proves |
+| --- | --- |
+| `TC-DEMO-PASS` | A genuinely passing case -- correct selector, no healing. |
+| `TC-DEMO-HEAL` | A stale locator (`"Old Login"`) that same-page healing repairs to `PASS_AFTER_HEALING`. |
+| `TC-DEMO-REMOVED` | An observed-but-absent element: healing is attempted (the element was "seen" with a verified role/name) and correctly fails live validation (`NOT_HEALED`); the case stays `FAIL` and surfaces in `Needs human review`. |
+| `TC-DEMO-DEFECT` | A real assertion mismatch (the heading says "Welcome back", the case expects "Wrong heading") -- classified **A**, shown as `WOULD_CREATE` in the Jira dry-run. |
+
+Each run gets a fresh timestamped approval-store ID, so spec and POM paths (`tests/generated/Demo__<storeId>/...`) never collide between runs -- running `npm run demo` twice produces the same four outcomes and leaves no generated spec or POM behind: the demo removes its own scoped `tests/generated/Demo__<storeId>/` and `pages/Demo__<storeId>/` directories when it finishes, so nothing it generates is ever left in normal test collection.
+
 ## 4. Test suites
 
 ```powershell
 npx playwright test tests/unit          # 238 passed, 0 failed, 0 skipped
-npx playwright test tests/integration   #  28 passed
+npx playwright test tests/integration   #  30 passed
 ```
 
 The **unit** suite is pure and fast and requires no prior artifacts; it includes 16 JSON-reporter parser tests, 29 failure-classifier tests, 13 fail-closed healing tests (locator healing plus `validateObservedCandidate`'s `isEnabled()` fail-closed contract), 14 final-report tests (JSON-level aggregation and the raw-data secret-scan contract; the PDF-generation tests now live in the integration suite below), 5 report-html tests (`src/report-html.ts`'s HTML renderer: every section heading, zero-filled A-E categories, BLOCKED never rendering as PASS, healing-log fields, no truncation), 6 CLI-argument tests, 12 spec/POM namespacing and content-fingerprint tests, and 22 Phase 6 smoke/regression contract tests (including a check that the repository's own `qa.config.json` has no declared-but-absent smoke path).
@@ -139,6 +158,7 @@ The **integration** suite drives real Playwright runs and the local fixture serv
 | `config-resolution.spec.ts` (4) | `--config` resolves from the repo root, so an explicit foreign cwd still gets the config's video/screenshot settings |
 | `phase6-suites.spec.ts` (5) | smoke config resolves to real specs on disk; regression selection over real repository state; fallback-sourced results never establish a baseline; an empty selection is not configured, not a pass; the final report merges both suite sections |
 | `report-pdf-html.spec.ts` (8) | every section heading survives real PDF text extraction; a >5000-character report is not truncated; a very long single value wraps instead of clipping; BLOCKED/SKIPPED never render as PASS; the planted-fake-secret never reaches the rendered PDF; PDF and JSON render the identical `humanReviewLabel()` sentence for zero signals, a signal attributed to one test, and a run-level signal |
+| `demo.spec.ts` (2) | `npm run demo` produces all four required outcomes from real output files; running it twice is idempotent and leaves no generated spec or POM behind |
 | `fixtures/selfcheck.spec.ts` (1) | minimal spec used by the artifact-capture tests |
 
 Fixture specs written at test time (deliberately failing) are generated into `tests/integration/fixtures/`, deleted in `afterAll`, gitignored, and guarded by `QA_RUN_GENERATED_FIXTURES` so a leftover from a crashed run is collected but skipped.
@@ -218,7 +238,7 @@ There is no hardcoded `baseURL`. Every spec navigates to an absolute URL, which 
 | Jira defect sink, real creation | PARTIAL — injected client and explicit opt-in path, not verified against live Jira |
 | Smoke test wiring | IMPLEMENTED — `npm run smoke` reads `qa.config.json`; an absent or empty list reports `SKIPPED_NOT_CONFIGURED` |
 | Regression test wiring | IMPLEMENTED — `npm run regression` selects `READY_FOR_AUTOMATION` cases whose last per-test result was `PASS` from source `playwright-json` |
-| Packaged end-to-end demo script | NOT STARTED |
+| Packaged end-to-end demo script | IMPLEMENTED — `npm run demo`, no flags; produces a passing case, a healed locator, a removed element surfaced for human review, and a category-A defect dry-run, every run, idempotently |
 
 ## 10. Known limitations
 
@@ -231,10 +251,11 @@ Verified as still open:
 - The PDF's Results table renders a captured error's raw text verbatim, including any ANSI color-code escape sequences from Playwright's terminal output (e.g. a literal `\u001b[2m`/`\u001b[22m` run around `expect(...)`); these are not stripped before HTML rendering, so that cell can read as garbled text instead of a clean message. Verified visually on a real 7-page demo-fixture report.
 - Jira real creation is off by default and requires an explicitly supplied Jira client plus `createReal: true` passed to `createDefect()` in `src/jira-defects.ts`; no live creation was verified, and there is no CLI flag for it today.
 - Evidence paths are checked; a missing artifact is reported as missing, not as proof of a passing run.
-- No packaged end-to-end demo script exists.
+- `DefectResult` (`src/jira-defects.ts`) carries no field that attributes a dry-run defect back to the test case that produced it; it is fingerprinted from the failure's own text, not keyed by `testCaseId`. Any caller matching a defect to a case (as `scripts/demo.js`'s summary table does) has to do so by other means -- in the demo's case, by knowing only one case is category A.
+- The generated spec's healing wrapper (`src/automation-generator.ts`'s `renderSpec`) triggers on any error message containing the word "locator" -- which Playwright's own call log includes for essentially every role-based assertion failure, including a genuine `Expected`/`Received` text mismatch where the locator resolved fine. A healing attempt is harmlessly made and rejected in that case (observed on `npm run demo`'s category-A case), and the final classification is unaffected because the failure classifier reads the original error text independently -- but the healing log can show an entry for a failure that was never a locator problem.
 - `AGENTS.md` describes an earlier Jira-ticket-centric workflow that this pipeline no longer implements (dynamic Jira scope discovery, a per-ticket lifecycle, `<ISSUE-KEY>.spec.ts` naming, a per-ticket authentication summary block). It now carries a SUPERSEDED banner pointing here and to `CLAUDE.md`, but the body text itself is kept as historical record and was not rewritten.
 
-Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; exit-code-fallback per-test attribution; Playwright 1.62 reporter parsing; category-A false positives from locator failures; unrecognized failures defaulting to Jira-eligible; the `qa` pipeline losing its exploration result; the hardcoded `baseURL`; `--config` no longer being gated on `storageState`; `healLocator` and `validatedHeal` no longer failing open without a validator; the fabricated `unique`/`visible`/`enabled` ranking flags; the unused `healLocator` import in `scripts/heal.js`; generated specs and Page Objects being keyed by module name alone (now namespaced per approval store, and content-fingerprinted so a regenerated file can never silently inherit an older PASS baseline); the integration suite flaking under default parallel workers (nested Playwright runs now each get a private, salted `--output` directory instead of sharing Playwright's default `test-results/`, which it wipes at startup); `src/final-report.ts`'s secret scan running on text that had already been sanitized, which meant it could never find a real secret in the raw run data (it now scans the raw data first and reports `MASKED <n>` or `FAIL` rather than always `PASS`); `src/healing-runtime.ts`'s `validateObservedCandidate` treating a thrown `isEnabled()` as `enabled: true` instead of failing closed; `scripts/report-pdf.js` rebuilding the `NEEDS HUMAN REVIEW` sentence by hand instead of calling `humanReviewLabel()` (it read "N finding(s) across 0 failing test(s)" for a run-level finding); and `scripts/report-pdf.js`'s `makePdf()` joining every report line onto one text row, which ran off the page's right edge after roughly 100 characters and made nearly the entire report invisible both on screen and to text extraction, despite being present in the PDF's raw bytes; and (replacing that hand-rolled single-content-stream PDF entirely) the hand-rolled renderer's 5000-character truncation and lack of line wrapping -- the PDF is now rendered from real HTML via Playwright `page.pdf()` with no length cut and natural pagination, verified by rendering a real 7-page demo-fixture report to images.
+Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; exit-code-fallback per-test attribution; Playwright 1.62 reporter parsing; category-A false positives from locator failures; unrecognized failures defaulting to Jira-eligible; the `qa` pipeline losing its exploration result; the hardcoded `baseURL`; `--config` no longer being gated on `storageState`; `healLocator` and `validatedHeal` no longer failing open without a validator; the fabricated `unique`/`visible`/`enabled` ranking flags; the unused `healLocator` import in `scripts/heal.js`; generated specs and Page Objects being keyed by module name alone (now namespaced per approval store, and content-fingerprinted so a regenerated file can never silently inherit an older PASS baseline); the integration suite flaking under default parallel workers (nested Playwright runs now each get a private, salted `--output` directory instead of sharing Playwright's default `test-results/`, which it wipes at startup); `src/final-report.ts`'s secret scan running on text that had already been sanitized, which meant it could never find a real secret in the raw run data (it now scans the raw data first and reports `MASKED <n>` or `FAIL` rather than always `PASS`); `src/healing-runtime.ts`'s `validateObservedCandidate` treating a thrown `isEnabled()` as `enabled: true` instead of failing closed; `scripts/report-pdf.js` rebuilding the `NEEDS HUMAN REVIEW` sentence by hand instead of calling `humanReviewLabel()` (it read "N finding(s) across 0 failing test(s)" for a run-level finding); and `scripts/report-pdf.js`'s `makePdf()` joining every report line onto one text row, which ran off the page's right edge after roughly 100 characters and made nearly the entire report invisible both on screen and to text extraction, despite being present in the PDF's raw bytes; and (replacing that hand-rolled single-content-stream PDF entirely) the hand-rolled renderer's 5000-character truncation and lack of line wrapping -- the PDF is now rendered from real HTML via Playwright `page.pdf()` with no length cut and natural pagination, verified by rendering a real 7-page demo-fixture report to images; and no packaged end-to-end demo script existing (`npm run demo` now runs the full chain against the local fixture and produces all four required outcomes -- a pass, a healed locator, a removed element surfaced for human review, and a category-A defect dry-run -- idempotently, every run).
 
 ## 11. Architecture overview
 
@@ -250,6 +271,7 @@ Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; 
 - `src/final-report.ts` — aggregates run data, collects human-review cases, verifies evidence paths, saves sanitized JSON.
 - `src/report-html.ts` — renders the same `FinalReport` object as HTML (real tables, no length cut); `scripts/report-pdf.js` turns it into a PDF with Playwright's `page.pdf()`.
 - `src/jira-defects.ts` — optional defect fingerprints, dry-run and injected Jira client operations.
+- `scripts/demo.js` — `npm run demo`: runs the full chain against `fixtures/demo-site` and produces a pass, a healed locator, a removed element, and a category-A defect dry-run in one idempotent run. The DEMO ONLY scripted approval lives only here, never in the production pipeline.
 
 ---
 
