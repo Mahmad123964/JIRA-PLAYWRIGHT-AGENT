@@ -13,8 +13,9 @@ PARTIAL / NOT STARTED table (section 9) is the source of truth.
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 6 | Smoke and regression suites | IMPLEMENTED (`07a76b7`, `d044ff8`, `4dea498`, `a1e0b48`, `2a155fa`, `3bf8e37`, `dd6a429`) |
-| 6b | Artifact collision / namespacing, content-fingerprint hashes, secret-scan self-blinding fix, PDF layout fix | IMPLEMENTED (`017f410`, `48e37f5`, `3b3263d`, `97ab13e`, `e0ddfdc`, `7b63338`, `04f4cd9`, `21109d1`, `da398b7`, `8c34b45`, `264c775`, `7e48596`, `055583f`) |
+| 6 | Smoke and regression suites | IMPLEMENTED (`07a76b7`, `d044ff8`, `4dea498`, `a1e0b48`, `2a155fa`, `3bf8e37`, `dd6a429`, `97ab13e`, `7e48596`) |
+| 6b | Artifact collision / namespacing, content-fingerprint hashes, secret-scan self-blinding fix, nested-run output-directory isolation, healing fail-closed (`isEnabled`) fix, and an interim PDF layout fix later superseded by Phase 6c | IMPLEMENTED (`017f410`, `48e37f5`, `3b3263d`, `e0ddfdc`, `7b63338`, `04f4cd9`, `21109d1`, `264c775`) |
+| 6c | PDF report demo-ready: rendered from HTML (`src/report-html.ts`) via Playwright `page.pdf()` instead of a hand-rolled PDF stream -- real tables, no 5000-character cut, natural pagination; verified by rendering a real 7-page demo-fixture report to images | IMPLEMENTED (`f0a4abe`) |
 | 7 | End-to-end demo on the local fixture | NOT STARTED |
 | 8 | QA test-case skill integration | NOT STARTED |
 | 9 | Platform adapters and target profiles | NOT STARTED |
@@ -133,5 +134,5 @@ GitHub Issues/PRs, Trello, Plane.
 - Legacy per-ticket scripts (`scripts/complete-jpa-*.js` etc.) are not cleaned up.
 - Screenshot and video capture mode (currently on-failure-only) is an open decision for
   Phase 10's evidence model.
-- The PDF renderer is a basic text renderer, not a rich layout engine.
+- The PDF renderer (Phase 6c) is now real HTML via `page.pdf()`, with no length cut and natural pagination. The one issue the visual proof found: the Results table renders a captured error's raw text verbatim, including any ANSI color-code escape sequences from Playwright's terminal output, which are not stripped before HTML rendering -- that one cell can read as garbled text.
 - The repository is public; visibility is the owner's decision.
