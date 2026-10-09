@@ -142,7 +142,7 @@ Each run gets a fresh timestamped approval-store ID, so spec and POM paths (`tes
 ## 4. Test suites
 
 ```powershell
-npx playwright test tests/unit          # 238 passed, 0 failed, 0 skipped
+npx playwright test tests/unit          # 255 passed, 0 failed, 0 skipped
 npx playwright test tests/integration   #  35 passed
 ```
 
