@@ -243,6 +243,45 @@ There is no hardcoded `baseURL`. Every spec navigates to an absolute URL, which 
 | Smoke test wiring | IMPLEMENTED — `npm run smoke` reads `qa.config.json`; an absent or empty list reports `SKIPPED_NOT_CONFIGURED` |
 | Regression test wiring | IMPLEMENTED — `npm run regression` selects `READY_FOR_AUTOMATION` cases whose last per-test result was `PASS` from source `playwright-json` |
 | Packaged end-to-end demo script | IMPLEMENTED — `npm run demo`, no flags; produces a passing case, a healed locator, a removed element surfaced for human review, and a category-A defect dry-run, every run, idempotently |
+| QA skill manual-track importer (Phase 8a) | IMPLEMENTED — `node scripts/import-skill-output.js`, parses a skill-generated Markdown/CSV table into the existing approval store; see "9b. QA skill manual-track importer" below |
+
+### 9b. QA skill manual-track importer
+
+`src/skill-import.ts` and `node scripts/import-skill-output.js --file <path> --module <m> --scope <s>`
+import a test-case table produced by the
+[qa-test-case-generation](https://github.com/saleem-daqa/qa-test-case-generation)
+skill (MIT licence; see `THIRD_PARTY_NOTICES.md`) — Markdown (its default
+template) or CSV, matching `assets/default-test-case-template.md`'s columns.
+
+- No LLM call and no network call happen in this repo; the skill itself runs
+  as a separate Claude Code/Codex session, and only its finished output file
+  is read here.
+- Every imported case is stored `PENDING_APPROVAL` with `automationEligibility:
+  "UNKNOWN"`, no `expectedAssertion`, and every step flagged `needsHumanInput`
+  — the skill's free-text `Expected Result` is never promoted to a verified
+  assertion. Cases go through the same `approveTestCase` / `editTestCase` /
+  `markReadyForAutomation` gate as every other case; nothing here bypasses it.
+- A file missing a required column (`Test Case ID`, `Module / Feature`, `Test
+  Scenario`, `Test Steps`, `Expected Result`, `Priority`) is rejected
+  entirely. A row missing a required value is rejected individually, with its
+  row number and reason, while other rows in the same file are still
+  imported.
+- Every cell is scanned with the existing `sanitizeSecrets` /
+  `detectPromptInjections` before storage; a row containing a prompt-injection
+  attempt is quarantined (reported, not imported) rather than masked and kept.
+- Duplicate cases (same module, preconditions, action, test data, and expected
+  result — `references/deduplication-rules.md`'s rule) are reported as
+  groups, never silently dropped.
+- A case whose only Source tag is `Inferred QA Risk` is flagged in its title
+  and `risks` — it carries no requirement or mockup evidence and automation
+  eligibility (Phase 8b, not yet built) must never mark it `yes` on that basis
+  alone.
+
+**Known limitation:** the importer is a best-effort text parser against a
+single table layout (the skill's default template); a reformatted table
+(merged cells, renamed columns, a different column order the header doesn't
+reflect) will either be rejected outright or produce rows rejected
+individually — it does not guess at reinterpreting an unrecognized layout.
 
 ## 10. Known limitations
 
