@@ -59,6 +59,14 @@ function main() {
   }
 
   const store = createApprovalStore(module_, scope, result.accepted);
+  // Persisted on the store so rejected/quarantined/duplicate rows stay visible to a
+  // human reviewer later, not only in this CLI's stdout.
+  store.importReport = {
+    rejected: result.rejected,
+    quarantined: result.quarantined,
+    duplicates: result.duplicates,
+    secretsMaskedCount: result.secretsMaskedCount,
+  };
   const storePath = saveApprovalStore(store);
 
   console.log(`Accepted: ${result.accepted.length}`);
@@ -72,7 +80,7 @@ function main() {
   }
   console.log(`Duplicate groups: ${result.duplicates.length}`);
   for (const d of result.duplicates) {
-    console.log(`  - ${d.testCaseIds.join(", ")}`);
+    console.log(`  - kept: ${d.keptTestCaseId}; set aside: ${d.setAsideTestCases.map((tc) => tc.testCaseId).join(", ")}`);
   }
   console.log(`Secrets masked: ${result.secretsMaskedCount}`);
   console.log(`Approval store saved: ${storePath}`);

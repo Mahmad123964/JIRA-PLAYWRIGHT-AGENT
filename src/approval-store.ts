@@ -3,6 +3,7 @@ import path from "path";
 import { sanitizeSecrets } from "./document-ingestion";
 import type { TestCase, TestCaseStatus } from "./test-case-generator";
 import type { ExplorationResult } from "./browser-explorer";
+import type { SkillImportReport } from "./skill-import";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -40,6 +41,8 @@ export interface ApprovalStore {
   explorationResultPath?: string;
   approvalRecords: ApprovalRecord[];
   testCases: TestCase[];
+  /** Present when testCases came from the manual-track skill importer: what it rejected, quarantined, or set aside as a duplicate. */
+  importReport?: SkillImportReport;
 }
 
 export interface ApprovalSummary {

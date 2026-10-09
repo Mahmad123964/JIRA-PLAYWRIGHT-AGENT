@@ -20,17 +20,32 @@ export interface RejectedRow {
   reason: string;
 }
 
-export interface DuplicateGroup {
-  key: string;
-  testCaseIds: string[];
+/** Same as RejectedRow, plus the row's cell content with any secrets already masked -- never the raw row. */
+export interface QuarantinedRow extends RejectedRow {
+  cells: Record<string, string>;
 }
 
-export interface SkillImportResult {
-  accepted: TestCase[];
+/**
+ * One case from the group is kept as the sole approvable case; the rest are
+ * set aside -- they never also reach the approval inbox as separate
+ * approvable cases, but their full data is retained here, never dropped.
+ */
+export interface DuplicateGroup {
+  key: string;
+  keptTestCaseId: string;
+  setAsideTestCases: TestCase[];
+}
+
+/** Persisted alongside an ApprovalStore so a human can see what an import did later, not only in CLI output. */
+export interface SkillImportReport {
   rejected: RejectedRow[];
+  quarantined: QuarantinedRow[];
   duplicates: DuplicateGroup[];
-  quarantined: RejectedRow[];
   secretsMaskedCount: number;
+}
+
+export interface SkillImportResult extends SkillImportReport {
+  accepted: TestCase[];
 }
 
 interface ParsedRow {
@@ -225,12 +240,14 @@ function dedupKey(tc: TestCase): string {
  * carries no expectedAssertion, and has every step flagged needsHumanInput --
  * nothing here is treated as verified. A row is rejected (not silently
  * patched) when required data is missing; a row containing a secret or a
- * prompt-injection attempt is quarantined instead of imported.
+ * prompt-injection attempt is quarantined instead of imported. A duplicate
+ * case is set aside rather than also entering the approval inbox as a
+ * separate approvable case, but its full data is kept in the result.
  */
 export function importSkillOutput(text: string, module: string): SkillImportResult {
   const accepted: TestCase[] = [];
   const rejected: RejectedRow[] = [];
-  const quarantined: RejectedRow[] = [];
+  const quarantined: QuarantinedRow[] = [];
   let secretsMaskedCount = 0;
 
   const { header, dataRows } = parseRows(text);
@@ -261,13 +278,14 @@ export function importSkillOutput(text: string, module: string): SkillImportResu
     }
 
     // Scan every cell for secrets / prompt injection BEFORE anything is stored.
+    // Secrets are masked across the whole row regardless of outcome, so a
+    // quarantined row's reported cells never carry a raw secret either.
     const sanitizedCells: Record<string, string> = {};
     let rowInjection: string | null = null;
     for (const [col, value] of Object.entries(row)) {
-      const injections = detectPromptInjections(value);
-      if (injections.length > 0) {
-        rowInjection = injections[0];
-        break;
+      if (!rowInjection) {
+        const injections = detectPromptInjections(value);
+        if (injections.length > 0) rowInjection = injections[0];
       }
       const { sanitized, maskedCount } = sanitizeSecrets(value);
       secretsMaskedCount += maskedCount;
@@ -275,7 +293,11 @@ export function importSkillOutput(text: string, module: string): SkillImportResu
     }
 
     if (rowInjection) {
-      quarantined.push({ row: rowNumber, reason: `Prompt injection attempt detected: "${rowInjection}"` });
+      quarantined.push({
+        row: rowNumber,
+        reason: `Prompt injection attempt detected: "${rowInjection}"`,
+        cells: sanitizedCells,
+      });
       continue;
     }
 
@@ -323,17 +345,32 @@ export function importSkillOutput(text: string, module: string): SkillImportResu
     accepted.push(tc);
   }
 
-  // Deduplication (references/deduplication-rules.md): report, never silently drop.
-  const groups = new Map<string, string[]>();
+  // Deduplication (references/deduplication-rules.md): the first case per key
+  // is kept as the sole approvable case; later ones are set aside rather than
+  // also reaching the approval inbox as separate approvable cases, but their
+  // full data is retained in the report -- never silently dropped.
+  const keptByKey = new Map<string, TestCase>();
+  const setAsideByKey = new Map<string, TestCase[]>();
+  const finalAccepted: TestCase[] = [];
+
   for (const tc of accepted) {
     const key = dedupKey(tc);
-    const list = groups.get(key) || [];
-    list.push(tc.testCaseId);
-    groups.set(key, list);
+    const kept = keptByKey.get(key);
+    if (kept) {
+      const list = setAsideByKey.get(key) || [];
+      list.push(tc);
+      setAsideByKey.set(key, list);
+    } else {
+      keptByKey.set(key, tc);
+      finalAccepted.push(tc);
+    }
   }
-  const duplicates: DuplicateGroup[] = [...groups.entries()]
-    .filter(([, ids]) => ids.length > 1)
-    .map(([key, ids]) => ({ key, testCaseIds: ids }));
 
-  return { accepted, rejected, duplicates, quarantined, secretsMaskedCount };
+  const duplicates: DuplicateGroup[] = [...setAsideByKey.entries()].map(([key, setAsideTestCases]) => ({
+    key,
+    keptTestCaseId: keptByKey.get(key)!.testCaseId,
+    setAsideTestCases,
+  }));
+
+  return { accepted: finalAccepted, rejected, duplicates, quarantined, secretsMaskedCount };
 }
