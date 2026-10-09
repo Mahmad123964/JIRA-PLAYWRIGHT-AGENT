@@ -209,6 +209,38 @@ test.describe("Skill import (manual-track Markdown/CSV)", () => {
     expect(store.testCases[0].status).toBe("READY_FOR_AUTOMATION");
   });
 
+  test("10. status is always PENDING_APPROVAL even when the skill's Status column says otherwise", () => {
+    const text = [
+      HEADER,
+      SEP,
+      row({
+        "Test Case ID": "TC-LOGIN-008",
+        "Module / Feature": "Login",
+        "Test Scenario": "Valid login succeeds",
+        "Test Steps": "Enter valid credentials and click Login",
+        "Expected Result": "User is redirected",
+        "Priority": "High",
+        "Status": "Approved",
+      }),
+      row({
+        "Test Case ID": "TC-LOGIN-009",
+        "Module / Feature": "Login",
+        "Test Scenario": "Logout succeeds",
+        "Test Steps": "Click Logout",
+        "Expected Result": "User is signed out",
+        "Priority": "Medium",
+        "Status": "Passed",
+      }),
+    ].join("\n");
+
+    const result = importSkillOutput(text, "Login");
+    expect(result.accepted.length).toBe(2);
+    for (const tc of result.accepted) {
+      expect(tc.status).toBe("PENDING_APPROVAL");
+      expect(tc.automationEligibility).toBe("UNKNOWN");
+    }
+  });
+
   test("CSV format is also accepted", () => {
     const csvHeader = "Test Case ID,Module / Feature,Test Scenario,Test Steps,Expected Result,Priority";
     const csvRow = 'TC-CSV-001,Login,"Valid login succeeds","Enter valid credentials","User is redirected",High';
