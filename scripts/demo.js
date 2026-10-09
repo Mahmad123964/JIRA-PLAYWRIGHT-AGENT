@@ -11,7 +11,7 @@
 // carries the same warning.
 const fs = require("fs");
 const path = require("path");
-const { spawn, execFileSync } = require("child_process");
+const { spawn, spawnSync, execFileSync } = require("child_process");
 const typescript = require("typescript");
 require.extensions[".ts"] = function (module, filename) {
   const out = typescript.transpileModule(fs.readFileSync(filename, "utf8"), {
@@ -102,6 +102,71 @@ function removeScopedArtifacts(storeId, moduleName) {
   fs.rmSync(path.join(REPO_ROOT, "tests", "generated", `${moduleName}__${storeId}`), { recursive: true, force: true });
 }
 
+/**
+ * Finds the PID(s) of whatever is listening on `port`, cross-platform.
+ * Returns an empty array (not an error) when nothing is listening or the
+ * platform tool isn't available -- this is a best-effort cleanup helper, not
+ * a hard requirement.
+ */
+function findListeningPids(port) {
+  try {
+    if (process.platform === "win32") {
+      const out = spawnSync("netstat", ["-ano"], { encoding: "utf8" }).stdout || "";
+      const pids = new Set();
+      for (const line of out.split(/\r?\n/)) {
+        if (!line.includes(`:${port} `) && !line.includes(`:${port}\t`)) continue;
+        if (!/LISTENING/i.test(line)) continue;
+        const match = line.trim().match(/(\d+)$/);
+        if (match) pids.add(match[1]);
+      }
+      return [...pids];
+    }
+    const out = spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || "";
+    return out.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function killPid(pid) {
+  try {
+    if (process.platform === "win32") spawnSync("taskkill", ["/F", "/PID", String(pid)]);
+    else process.kill(Number(pid), "SIGKILL");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Detects and removes leftovers from a previous crashed or killed run, before
+ * starting a new one: stale tests/generated/Demo__*, pages/Demo__*
+ * directories, and anything still listening on the demo port (an orphaned
+ * fixture server left behind because a hard kill skips the `finally` block
+ * below that would normally stop it). Reports what it cleaned, or nothing if
+ * the slate was already clean.
+ */
+function cleanupStaleArtifacts(port) {
+  const cleaned = [];
+
+  for (const base of [path.join(REPO_ROOT, "tests", "generated"), path.join(REPO_ROOT, "pages")]) {
+    if (!fs.existsSync(base)) continue;
+    for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith("Demo__")) continue;
+      fs.rmSync(path.join(base, entry.name), { recursive: true, force: true });
+      cleaned.push(`${path.relative(REPO_ROOT, base).replace(/\\/g, "/")}/${entry.name}`);
+    }
+  }
+
+  const pids = findListeningPids(port);
+  for (const pid of pids) {
+    if (killPid(pid)) cleaned.push(`process ${pid} listening on port ${port}`);
+  }
+
+  if (cleaned.length) console.warn(`Cleaned up ${cleaned.length} leftover(s) from a previous run:\n  ${cleaned.join("\n  ")}`);
+  return cleaned;
+}
+
 function readSuiteSection(runId, mode) {
   const file = path.resolve(REPO_ROOT, "reports", runId, `${mode}-report.json`);
   if (!fs.existsSync(file)) return null;
@@ -149,13 +214,28 @@ function printSummaryTable(rows, defects) {
   for (const row of tableRows) console.log(line(row));
 }
 
+// Set while a run is in flight, so a SIGINT/SIGTERM handler registered by
+// main() (CLI use only -- never when runDemo() is required by a test) can run
+// the exact same cleanup a normal completion runs in its `finally` block.
+let activeCleanup = null;
+
 async function runDemo(options = {}) {
   const port = options.port || DEFAULT_PORT;
   const url = `http://127.0.0.1:${port}/`;
   const runId = options.runId || `demo-${Date.now()}`;
 
+  // A previous run that was killed hard (SIGKILL, or before the SIGINT/SIGTERM
+  // handling below existed) never reached its own `finally` block, so its
+  // generated files and fixture server can still be here. Clear them before
+  // starting, so this run begins from a genuinely clean slate.
+  cleanupStaleArtifacts(port);
+
   const server = spawn(process.execPath, [path.join(REPO_ROOT, "fixtures/demo-site/server.js")], { env: { ...process.env, DEMO_SITE_PORT: String(port) }, stdio: "ignore" });
   let store;
+  activeCleanup = () => {
+    server.kill();
+    if (store) removeScopedArtifacts(store.storeId, "Demo");
+  };
   try {
     await waitForDemoSite(url);
 
@@ -196,13 +276,25 @@ async function runDemo(options = {}) {
 
     return { runId, store, result, report, reportPath, pdfPath, rows };
   } finally {
-    server.kill();
-    if (store) removeScopedArtifacts(store.storeId, "Demo");
+    activeCleanup();
+    activeCleanup = null;
   }
 }
 
 async function main() {
+  // Ctrl+C (SIGINT) or an external SIGTERM must run the same cleanup a normal
+  // completion runs in runDemo()'s `finally` -- otherwise the demo-site
+  // server and the generated spec/POM files for the in-flight run are
+  // orphaned exactly like a hard kill (SIGKILL cannot be caught at all; that
+  // case is handled by cleanupStaleArtifacts() at the start of the next run).
+  const shutdown = (signal) => {
+    console.warn(`\nReceived ${signal}, cleaning up before exit...`);
+    if (activeCleanup) activeCleanup();
+    process.exit(1);
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
   await runDemo();
 }
 if (require.main === module) main().catch((error) => { console.error(error.stack || error.message); process.exitCode = 1; });
-module.exports = { main, runDemo };
+module.exports = { main, runDemo, cleanupStaleArtifacts };

@@ -100,3 +100,45 @@ test("running the demo twice is idempotent: same four outcomes, no leftover gene
 
   expect(countDemoDirs()).toBe(generatedBefore);
 });
+
+test("a stale server and leftover generated files from a crashed run are cleaned up before starting", async ({}, testInfo) => {
+  testInfo.setTimeout(60000);
+  const crashPort = DEMO_PORT + 2;
+
+  // Plant leftovers exactly like a hard-killed previous run would leave:
+  // generated spec/POM directories under the Demo__ namespace...
+  const staleSpecDir = path.resolve("tests/generated/Demo__fake-crashed-run");
+  const stalePageDir = path.resolve("pages/Demo__fake-crashed-run");
+  fs.mkdirSync(staleSpecDir, { recursive: true });
+  fs.writeFileSync(path.join(staleSpecDir, "TC-FAKE.spec.ts"), "// leftover from a crashed run\n", "utf8");
+  fs.mkdirSync(stalePageDir, { recursive: true });
+  fs.writeFileSync(path.join(stalePageDir, "FakePage.ts"), "// leftover from a crashed run\n", "utf8");
+
+  // ...and an orphaned server still listening on the port this run will use.
+  const { spawn } = require("child_process");
+  const orphan = spawn(process.execPath, [path.resolve("fixtures/demo-site/server.js")], { env: { ...process.env, DEMO_SITE_PORT: String(crashPort) }, stdio: "ignore" });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await expect.poll(async () => {
+    try { return (await fetch(`http://127.0.0.1:${crashPort}/`)).ok; } catch { return false; }
+  }, { timeout: 5000 }).toBe(true);
+
+  try {
+    const { runDemo } = require("../../scripts/demo.js");
+    const { rows } = await runDemo({ port: crashPort });
+
+    // The leftovers are gone -- cleaned up before this run even started.
+    expect(fs.existsSync(staleSpecDir)).toBe(false);
+    expect(fs.existsSync(stalePageDir)).toBe(false);
+
+    // The run still completed normally with the real four outcomes, proving
+    // the stale-port server was freed rather than causing a startup hang or
+    // a collision with this run's own fixture server.
+    expect(rows.find((r: { testCaseId: string }) => r.testCaseId === "TC-DEMO-PASS")?.status).toBe("PASS");
+    expect(rows.find((r: { testCaseId: string }) => r.testCaseId === "TC-DEMO-HEAL")?.healingOutcome).toBe("PASS_AFTER_HEALING");
+    expect(rows.find((r: { testCaseId: string }) => r.testCaseId === "TC-DEMO-REMOVED")?.healingOutcome).toBe("NOT_HEALED");
+    expect(rows.find((r: { testCaseId: string }) => r.testCaseId === "TC-DEMO-DEFECT")?.category).toBe("A. REAL APPLICATION DEFECT");
+  } finally {
+    // In case cleanup somehow didn't reach the orphan (it should have).
+    orphan.kill();
+  }
+});
