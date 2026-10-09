@@ -1,13 +1,18 @@
 import { test, expect } from "@playwright/test";
 import fs from "fs";
-import path from "path";
 import { createApprovalStore, saveApprovalStore, approveTestCase, markReadyForAutomation } from "../../src/approval-store";
 import { runApprovedCases } from "../../src/approved-runner";
 import type { ExplorationResult } from "../../src/browser-explorer";
 import type { TestCase } from "../../src/test-case-generator";
 
+// This URL is never actually dereferenced by either test below: both cases
+// are blocked before execution reaches the generated spec (no READY case in
+// the first, a missing expectedAssertion in the second), so no network call
+// is made. A placeholder is used rather than a real external site (compare
+// tests/integration/approved-runner-execution.spec.ts, which genuinely
+// executes against the local fixture and needs a real, reachable target).
 function makeExploration(): ExplorationResult {
-  return { target: { url: "https://example.com", module: "Auth", scope: "Login", requirements: ["Login works"] }, status: "SUCCESS", explorationStatus: "SUCCESS", exploredAt: new Date().toISOString(), pagesVisited: ["https://example.com"], elements: [], workflows: [], observations: [], requirementsCoverage: [], warnings: [], provenance: [], secretsMaskedCount: 0, promptInjectionDetected: false };
+  return { target: { url: "http://127.0.0.1:0/", module: "Auth", scope: "Login", requirements: ["Login works"] }, status: "SUCCESS", explorationStatus: "SUCCESS", exploredAt: new Date().toISOString(), pagesVisited: ["http://127.0.0.1:0/"], elements: [], workflows: [], observations: [], requirementsCoverage: [], warnings: [], provenance: [], secretsMaskedCount: 0, promptInjectionDetected: false };
 }
 function makeCase(status: TestCase["status"], withAssertion = true): TestCase {
   const step: TestCase["steps"][number] = withAssertion
@@ -68,16 +73,9 @@ test("approved runner lists READY cases missing expected assertions", async () =
   expect(result.approval.blockedCases[0].reason).toContain("expectedAssertion");
 });
 
-test("approved runner generates and executes only ready verified cases", async () => {
-  const exploration = makeExploration();
-  const store = createApprovalStore("Auth", "Login", [makeCase("PENDING_APPROVAL")], exploration);
-  approveTestCase(store, "TC-PENDING_APPROVAL", "reviewer");
-  markReadyForAutomation(store, "TC-PENDING_APPROVAL");
-  saveApprovalStore(store);
-  const result = await runApprovedCases({ storeId: store.storeId, runId: "approved-ready-case", outputRoot: "test-results/approved-runner", captureArtifacts: false });
-  expect(["SUCCESS", "FAILED", "BLOCKED", "PARTIAL"]).toContain(result.status);
-  expect(result.approval.readyCaseIds).toEqual(["TC-PENDING_APPROVAL"]);
-  expect(result.automation.generated.some((file) => file.kind === "spec")).toBe(true);
-  expect(result.resultPath).toBeTruthy();
-  expect(fs.existsSync(path.resolve(result.resultPath!))).toBe(true);
-});
+// "approved runner generates and executes only ready verified cases" moved to
+// tests/integration/approved-runner-execution.spec.ts: it spawns a real
+// nested Playwright process that executes the generated spec, which needs a
+// real, reachable target. It previously navigated to https://example.com --
+// an external network dependency inside a suite documented as pure and fast
+// with no network -- replaced there with the local demo-site fixture.
