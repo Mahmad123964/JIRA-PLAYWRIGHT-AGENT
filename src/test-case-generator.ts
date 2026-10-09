@@ -31,12 +31,13 @@ export interface TestStep {
 }
 
 export interface TestCaseSource {
-  type: "manual" | "file" | "jira" | "notion" | "slack" | "github" | "pdf" | "browser-exploration" | "requirement" | "human-supplied";
+  type: "manual" | "file" | "jira" | "notion" | "slack" | "github" | "pdf" | "browser-exploration" | "requirement" | "human-supplied" | "manual-skill-import";
   id?: string;
   pageId?: string;
   page?: string;
   observationId?: string;
   location?: string;
+  /** For requirement-type sources: requirement text. For manual-skill-import: the skill's Source tag (Requirement / Mockup / Requirement + Mockup / Inferred QA Risk). */
   requirement?: string;
 }
 
