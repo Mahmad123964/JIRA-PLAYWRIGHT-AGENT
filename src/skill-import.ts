@@ -1,3 +1,6 @@
+// Table schema and Source tag names referenced below come from the
+// qa-test-case-generation skill (github.com/saleem-daqa/qa-test-case-generation,
+// MIT licence). See THIRD_PARTY_NOTICES.md. No files from that repo are vendored here.
 import { sanitizeSecrets, detectPromptInjections } from "./document-ingestion";
 import type { TestCase, TestCasePriority, TestCaseType } from "./test-case-generator";
 
