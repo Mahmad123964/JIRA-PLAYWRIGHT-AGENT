@@ -76,7 +76,9 @@ GitHub Issues/PRs, Trello, Plane.
    test list, defect destination). The standing prompt never changes, only the
    profile, for example: "Run the full QA workflow for profile `<name>`. Follow
    AGENTS.md." The final generic prompt is written in Phase 14.
-7. **QA skill (Phase 8).** Based on
+7. **QA skill (Phase 8).** 8a IMPLEMENTED (bbb1e71) — manual-track importer
+   (`src/skill-import.ts`, `scripts/import-skill-output.js`). 8b (automation
+   bridge) and 8c (report integration) not yet started. Based on
    [github.com/saleem-daqa/qa-test-case-generation](https://github.com/saleem-daqa/qa-test-case-generation)
    (MIT licence, keep attribution). One shared front half (requirement summary, gap
    analysis, assumptions, clarifications, test case design, deduplication), then two
