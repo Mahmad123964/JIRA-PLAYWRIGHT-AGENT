@@ -71,13 +71,14 @@ test("approved runner generates and executes only ready verified cases", async (
   const result = await runApprovedCases({ storeId: store.storeId, runId: "approved-ready-case", captureArtifacts: false });
   removeScopedArtifacts(store.storeId);
 
-  expect(["SUCCESS", "FAILED", "BLOCKED", "PARTIAL"]).toContain(result.status);
   expect(result.approval.readyCaseIds).toEqual(["TC-PENDING_APPROVAL"]);
   expect(result.automation.generated.some((file) => file.kind === "spec")).toBe(true);
   expect(result.resultPath).toBeTruthy();
   expect(fs.existsSync(path.resolve(result.resultPath!))).toBe(true);
-  // Against the real fixture, the Login button is genuinely visible: a real
-  // per-test PASS, not just a non-crash outcome.
+  // Against the real fixture (unlike the old https://example.com target, of
+  // unknown and unverified reachability), the Login button is deterministically
+  // visible: assert the real outcome, SUCCESS with one real PASS, not just one
+  // of four possible non-crash statuses.
   expect(result.status).toBe("SUCCESS");
   expect(result.execution?.totals.passed).toBe(1);
 });
