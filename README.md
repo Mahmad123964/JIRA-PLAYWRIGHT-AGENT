@@ -283,15 +283,12 @@ template) or CSV, matching `assets/default-test-case-template.md`'s columns.
   columns, a different column order the header doesn't reflect) will either
   be rejected outright or produce rows rejected individually — it does not
   guess at reinterpreting an unrecognized layout.
-- **Markdown cells containing a literal `|` character are not escaped and
-  will silently misalign every later column in that row** (verified: a cell
-  containing `a|b` shifted `Priority` into what should have been `Test
-  Data`, with no row rejection and no warning). CSV import is unaffected
-  (quoted commas parse correctly) and a cell containing a newline is safe
-  (it splits into two rows, both rejected individually for missing required
-  values) — only the Markdown pipe-delimiter case corrupts data silently.
-  Export from the skill as CSV, or avoid `|` in Markdown cell content, until
-  this is fixed.
+- **Fixed:** a Markdown cell containing a literal `|` previously misaligned
+  every later column silently. `\|` inside a cell is now the one valid way
+  to include a literal pipe (parsed as that character, not a column
+  boundary); any other row whose cell count doesn't match the header —
+  including an unescaped `|` splitting a cell in two — is now rejected with
+  its row number and reason, never silently shifted.
 - Verified safe: quoted CSV values containing commas, reordered columns,
   extra/unrecognized columns (ignored), an empty file (rejected with a clear
   error, exit code 1), and large files (5,000 rows imported in ~1.4s with no

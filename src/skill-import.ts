@@ -73,10 +73,31 @@ const SOURCE_TAG_VALUES: SkillSourceTag[] = ["Requirement", "Mockup", "Requireme
 // Table / CSV parsing
 // ----------------------------------------------------------------------------
 
+/**
+ * Splits a Markdown table row on "|", honoring "\|" as an escaped literal
+ * pipe inside a cell. An unescaped "|" inside a cell's intended content is
+ * indistinguishable from a real column boundary -- that row is left with
+ * more cells than the header and is rejected by the caller, never silently
+ * shifted.
+ */
 function splitMarkdownRow(line: string): string[] {
   const trimmed = line.trim();
   const body = trimmed.startsWith("|") && trimmed.endsWith("|") ? trimmed.slice(1, -1) : trimmed;
-  return body.split("|").map((c) => c.trim());
+  const cells: string[] = [];
+  let current = "";
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === "\\" && body[i + 1] === "|") {
+      current += "|";
+      i++;
+    } else if (body[i] === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += body[i];
+    }
+  }
+  cells.push(current.trim());
+  return cells;
 }
 
 function isMarkdownSeparatorRow(line: string): boolean {
@@ -223,6 +244,14 @@ export function importSkillOutput(text: string, module: string): SkillImportResu
   const generatedAt = new Date().toISOString();
 
   for (const { rowNumber, cells } of dataRows) {
+    if (cells.length !== header.length) {
+      rejected.push({
+        row: rowNumber,
+        reason: `Column count mismatch: expected ${header.length} columns (matching the header), got ${cells.length}`,
+      });
+      continue;
+    }
+
     const row = toRowRecord(header, cells, rowNumber).cells;
 
     const missingRequired = REQUIRED_COLUMNS.filter((col) => !row[col] || row[col].trim() === "");

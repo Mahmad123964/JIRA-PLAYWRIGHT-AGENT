@@ -249,4 +249,62 @@ test.describe("Skill import (manual-track Markdown/CSV)", () => {
     expect(result.accepted.length).toBe(1);
     expect(result.accepted[0].title).toContain("Valid login succeeds");
   });
+
+  test("11. a Markdown row with an unescaped extra pipe is rejected, never silently shifted", () => {
+    const text = [
+      HEADER,
+      SEP,
+      row({
+        "Test Case ID": "TC-PIPE-001",
+        "Module / Feature": "Login",
+        "Test Scenario": "Enter a value with a pipe",
+        "Preconditions": "On page",
+        "Test Steps": 'Type "a|b" in the field',
+        "Test Data": "n/a",
+        "Expected Result": "Field accepts a|b",
+        "Priority": "Low",
+      }),
+    ].join("\n");
+
+    const result = importSkillOutput(text, "Login");
+    expect(result.accepted.length).toBe(0);
+    expect(result.rejected.length).toBe(1);
+    expect(result.rejected[0].reason).toMatch(/Column count mismatch/);
+  });
+
+  test("12. a Markdown row with an escaped pipe (\\|) is parsed correctly with later columns aligned", () => {
+    const text = [
+      HEADER,
+      SEP,
+      row({
+        "Test Case ID": "TC-PIPE-002",
+        "Module / Feature": "Login",
+        "Test Scenario": "Enter a value with a pipe",
+        "Preconditions": "On page",
+        "Test Steps": 'Type "a\\|b" in the field',
+        "Test Data": "n/a",
+        "Expected Result": "Field accepts a\\|b",
+        "Priority": "Low",
+        "Severity": "Minor",
+      }),
+    ].join("\n");
+
+    const result = importSkillOutput(text, "Login");
+    expect(result.accepted.length).toBe(1);
+    const tc = result.accepted[0];
+    expect(tc.steps[0].action).toBe('Type "a|b" in the field');
+    expect(tc.expectedResult).toBe("Field accepts a|b");
+    // Priority (a later column) must land correctly, proving no column shift occurred.
+    expect(tc.priority).toBe("Low");
+  });
+
+  test("13. header/row cell-count mismatch is rejected (fewer cells than header)", () => {
+    const shortRow = "| TC-SHORT-001 | Login | Too few cells |";
+    const text = [HEADER, SEP, shortRow].join("\n");
+
+    const result = importSkillOutput(text, "Login");
+    expect(result.accepted.length).toBe(0);
+    expect(result.rejected.length).toBe(1);
+    expect(result.rejected[0].reason).toMatch(/Column count mismatch/);
+  });
 });
