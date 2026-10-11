@@ -142,7 +142,7 @@ Each run gets a fresh timestamped approval-store ID, so spec and POM paths (`tes
 ## 4. Test suites
 
 ```powershell
-npx playwright test tests/unit          # 255 passed, 0 failed, 0 skipped
+npx playwright test tests/unit          # 268 passed, 0 failed, 0 skipped
 npx playwright test tests/integration   #  35 passed
 ```
 
@@ -244,6 +244,7 @@ There is no hardcoded `baseURL`. Every spec navigates to an absolute URL, which 
 | Regression test wiring | IMPLEMENTED — `npm run regression` selects `READY_FOR_AUTOMATION` cases whose last per-test result was `PASS` from source `playwright-json` |
 | Packaged end-to-end demo script | IMPLEMENTED — `npm run demo`, no flags; produces a passing case, a healed locator, a removed element surfaced for human review, and a category-A defect dry-run, every run, idempotently |
 | QA skill manual-track importer (Phase 8a) | IMPLEMENTED — `node scripts/import-skill-output.js`, parses a skill-generated Markdown/CSV table into the existing approval store; see "9b. QA skill manual-track importer" below |
+| `automatable` field / automation bridge (Phase 8b) | IMPLEMENTED — pure, deterministic precondition for `READY_FOR_AUTOMATION`; see "9c. automatable: the automation bridge" below |
 
 ### 9b. QA skill manual-track importer
 
@@ -294,6 +295,58 @@ template) or CSV, matching `assets/default-test-case-template.md`'s columns.
   error, exit code 1), and large files (5,000 rows imported in ~1.4s with no
   degradation).
 
+### 9c. `automatable`: the automation bridge (Phase 8b)
+
+Every `TestCase` carries an `automatable` field (`src/test-case-generator.ts`,
+`computeAutomatable()`): a pure, deterministic function with no LLM call and
+no network call, and the precondition `markReadyForAutomation` (in
+`src/approval-store.ts`) checks before letting an `APPROVED` case become
+`READY_FOR_AUTOMATION`.
+
+- **`"yes"`** only when every step has (a) a `selectorHint` that resolves to
+  a real element in the exploration data stored with the approval store —
+  the same check `applyVerifiedAssertions()` already uses — **and** (b) a
+  non-empty `expectedAssertion` whose `assertionProvenance` traces back to
+  that verified element (`browser-exploration`) or to an explicit
+  human-supplied outcome (`human-supplied`). The skill's free-text prose is
+  never a path to `"yes"`.
+- **`"needs-human-input"`** is the default for anything not fully proven: a
+  missing or unverified selector, or a missing/unproven assertion.
+- **`"manual-only"`** is for a case whose only Source tag is `Inferred QA
+  Risk` and which has no verified UI target at all (no step's selector
+  resolves against real exploration data), or for a case whose title/
+  objective signals it needs visual or subjective human judgment (a
+  lightweight keyword heuristic; no generator or importer in this repo
+  currently produces that signal, so this path is reserved rather than
+  exercised today).
+- A case tagged `Inferred QA Risk` can **never** be `"yes"` on its own —
+  not even once it gains a verified selector, if it still lacks a proven
+  assertion. It becomes eligible only once its steps gain the exact same
+  verified-selector-and-proven-assertion evidence any other case needs;
+  the Inferred QA Risk tag itself never grants or blocks that on its own
+  merits beyond the "no verified target at all" rule above.
+- Manual-track imports (Phase 8a, `src/skill-import.ts`) never have a
+  `selectorHint` at all (no exploration data exists at import time), so
+  they always start as `"needs-human-input"` (or `"manual-only"` for
+  Inferred QA Risk rows) — never `"yes"`.
+- `editTestCase` always recomputes `automatable` from the edited steps and
+  the store's `explorationResult` after applying the edit, and strips any
+  caller-supplied `automatable` from the update first — a reviewer's edit
+  can raise or lower the value, but can never set it directly. Editing still
+  reverts status to `PENDING_APPROVAL` as before.
+- `markReadyForAutomation` now refuses a case whose `automatable !== "yes"`
+  even if it's `APPROVED`, with an error naming the actual value, e.g.
+  `Cannot mark READY_FOR_AUTOMATION: automatable is "needs-human-input", not "yes". <id> needs a verified selector and a proven or human-supplied assertion on every step.`
+  Nothing bypasses this, and nothing invents a selector or assertion to
+  satisfy it.
+- `scripts/demo.js`'s four fixtures hand-set `automatable: "yes"`, the same
+  way they already hand-set `automationEligibility: "ELIGIBLE"` — two of
+  them (`TC-DEMO-HEAL`, `TC-DEMO-REMOVED`) deliberately use a stale
+  `selectorHint` to exercise runtime same-page healing, which
+  `computeAutomatable`'s static check (looking only at current exploration
+  data) would not reflect. These are curated fixtures simulating already-
+  vetted cases, not output from the real generator pipeline.
+
 ## 10. Known limitations
 
 Verified as still open:
@@ -306,6 +359,8 @@ Verified as still open:
 - Evidence paths are checked; a missing artifact is reported as missing, not as proof of a passing run.
 - `DefectResult` (`src/jira-defects.ts`) carries no field that attributes a dry-run defect back to the test case that produced it; it is fingerprinted from the failure's own text, not keyed by `testCaseId`. Any caller matching a defect to a case (as `scripts/demo.js`'s summary table does) has to do so by other means -- in the demo's case, by knowing only one case is category A.
 - `AGENTS.md` describes an earlier Jira-ticket-centric workflow that this pipeline no longer implements (dynamic Jira scope discovery, a per-ticket lifecycle, `<ISSUE-KEY>.spec.ts` naming, a per-ticket authentication summary block). It now carries a SUPERSEDED banner pointing here and to `CLAUDE.md`, but the body text itself is kept as historical record and was not rewritten.
+- An approval store created purely from `scripts/import-skill-output.js` (Phase 8a) carries no `explorationResult` -- there is no existing flow that attaches a browser exploration to an imported store. Editing a case there to add a `selectorHint` can never make `automatable` become `"yes"`, because `computeAutomatable` has no real exploration data to verify that selector against; the field can only reach `"yes"` for a case whose store has a genuine `ExplorationResult` attached.
+- `computeAutomatable`'s `"manual-only"` path for visual/subjective judgment is a keyword heuristic (`src/test-case-generator.ts`'s `INHERENTLY_MANUAL_PATTERN`) that no generator or importer in this repo currently produces a matching case for -- it is reserved, not exercised by any real pipeline output today.
 
 Now fixed and no longer listed: unsupported `--video`/`--screenshot` CLI flags; exit-code-fallback per-test attribution; Playwright 1.62 reporter parsing; category-A false positives from locator failures; unrecognized failures defaulting to Jira-eligible; the `qa` pipeline losing its exploration result; the hardcoded `baseURL`; `--config` no longer being gated on `storageState`; `healLocator` and `validatedHeal` no longer failing open without a validator; the fabricated `unique`/`visible`/`enabled` ranking flags; the unused `healLocator` import in `scripts/heal.js`; generated specs and Page Objects being keyed by module name alone (now namespaced per approval store, and content-fingerprinted so a regenerated file can never silently inherit an older PASS baseline); the integration suite flaking under default parallel workers (nested Playwright runs now each get a private, salted `--output` directory instead of sharing Playwright's default `test-results/`, which it wipes at startup); `src/final-report.ts`'s secret scan running on text that had already been sanitized, which meant it could never find a real secret in the raw run data (it now scans the raw data first and reports `MASKED <n>` or `FAIL` rather than always `PASS`); `src/healing-runtime.ts`'s `validateObservedCandidate` treating a thrown `isEnabled()` as `enabled: true` instead of failing closed; `scripts/report-pdf.js` rebuilding the `NEEDS HUMAN REVIEW` sentence by hand instead of calling `humanReviewLabel()` (it read "N finding(s) across 0 failing test(s)" for a run-level finding); and `scripts/report-pdf.js`'s `makePdf()` joining every report line onto one text row, which ran off the page's right edge after roughly 100 characters and made nearly the entire report invisible both on screen and to text extraction, despite being present in the PDF's raw bytes; and (replacing that hand-rolled single-content-stream PDF entirely) the hand-rolled renderer's 5000-character truncation and lack of line wrapping -- the PDF is now rendered from real HTML via Playwright `page.pdf()` with no length cut and natural pagination, verified by rendering a real 7-page demo-fixture report to images; and no packaged end-to-end demo script existing (`npm run demo` now runs the full chain against the local fixture and produces all four required outcomes -- a pass, a healed locator, a removed element surfaced for human review, and a category-A defect dry-run -- idempotently, every run); the generated spec's healing wrapper triggering on any error message containing the bare word "locator" instead of a genuine locator-not-found/empty signal, which routed a plain `Expected`/`Received` assertion mismatch into a (harmless but incorrect) healing attempt (it now mirrors `failure-classifier.ts`'s `LOCATOR_UNRESOLVED` pattern, minus strict-mode violations, which are not healable); and ANSI color-code escape sequences from captured Playwright error text rendering as garbled bytes in the PDF's Results table (now stripped via `stripAnsi()` at the HTML renderer's single text-escaping choke point, verified against a real captured error string and a re-rendered demo PDF); `tests/unit/approved-runner.spec.ts`'s third test spawning a real nested Playwright process against `https://example.com` -- an external network dependency inside a suite documented as pure, fast and requiring no prior artifacts -- moved to `tests/integration/approved-runner-execution.spec.ts` against the local fixture, verified passing 5 times in a row; and `npm run demo` leaving an orphaned fixture server and generated spec/POM directories behind on a hard kill or crash (it now detects and cleans up stale `Demo__*` leftovers and anything still listening on its port at the start of every run, and reports what it cleaned; `Ctrl+C`/`SIGTERM` also trigger the same cleanup immediately, though that specific path could not be verified from this non-interactive environment -- see "Run the demo" above).
 
