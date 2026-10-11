@@ -78,7 +78,10 @@ GitHub Issues/PRs, Trello, Plane.
    AGENTS.md." The final generic prompt is written in Phase 14.
 7. **QA skill (Phase 8).** 8a IMPLEMENTED (0740827, 45dda5c) — manual-track
    importer (`src/skill-import.ts`, `scripts/import-skill-output.js`). 8b
-   (automation bridge) and 8c (report integration) not yet started. Based on
+   IMPLEMENTED (b078de6) — `automatable` field and `computeAutomatable()`
+   (`src/test-case-generator.ts`), enforced as a `READY_FOR_AUTOMATION`
+   precondition in `src/approval-store.ts`. 8c (report integration) not yet
+   started. Based on
    [github.com/saleem-daqa/qa-test-case-generation](https://github.com/saleem-daqa/qa-test-case-generation)
    (MIT licence, keep attribution). One shared front half (requirement summary, gap
    analysis, assumptions, clarifications, test case design, deduplication), then two
