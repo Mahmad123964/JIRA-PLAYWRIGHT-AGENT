@@ -339,13 +339,22 @@ no network call, and the precondition `markReadyForAutomation` (in
   `Cannot mark READY_FOR_AUTOMATION: automatable is "needs-human-input", not "yes". <id> needs a verified selector and a proven or human-supplied assertion on every step.`
   Nothing bypasses this, and nothing invents a selector or assertion to
   satisfy it.
-- `scripts/demo.js`'s four fixtures hand-set `automatable: "yes"`, the same
-  way they already hand-set `automationEligibility: "ELIGIBLE"` — two of
-  them (`TC-DEMO-HEAL`, `TC-DEMO-REMOVED`) deliberately use a stale
-  `selectorHint` to exercise runtime same-page healing, which
-  `computeAutomatable`'s static check (looking only at current exploration
-  data) would not reflect. These are curated fixtures simulating already-
-  vetted cases, not output from the real generator pipeline.
+- **`scripts/demo.js` is DEMO ONLY** (same banner as its existing scripted-
+  approval comment) and is the sole exception: its four fixtures hand-set
+  `automatable: "yes"` directly in the literal passed to
+  `createApprovalStore`, the same way they already hand-set
+  `automationEligibility: "ELIGIBLE"`. None of the four would actually
+  compute to `"yes"` via `computeAutomatable()`, for two different reasons:
+  all four lack `assertionProvenance` (only the real generator's
+  `applyVerifiedAssertions()` stamps that onto a step; these are hand-built
+  literals, not generator output) — that alone is why `TC-DEMO-PASS` and
+  `TC-DEMO-DEFECT` would compute to `"needs-human-input"` despite a
+  `selectorHint` that genuinely matches the real exploration data; and
+  `TC-DEMO-HEAL`/`TC-DEMO-REMOVED` additionally use a deliberately stale
+  `selectorHint`, stacked on top of the same missing-provenance gap, to
+  exercise runtime same-page healing. `tests/unit/automatable-no-handset.spec.ts`
+  enforces that no file under `src/` and no script other than `demo.js`
+  ever hand-sets `automatable`.
 
 ## 10. Known limitations
 

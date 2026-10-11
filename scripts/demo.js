@@ -66,11 +66,20 @@ function buildDemoCases(url) {
     elements, workflows: [], observations: [], requirementsCoverage: [], warnings: [], provenance: [], secretsMaskedCount: 0, promptInjectionDetected: false,
   };
   const now = () => new Date().toISOString();
-  // automatable: "yes" is hand-set on all four, same as automationEligibility above.
-  // TC-DEMO-HEAL and TC-DEMO-REMOVED deliberately use a stale selectorHint to exercise
-  // runtime healing, so computeAutomatable's static selector check (which only looks at
-  // the current exploration data) would not reflect that these are meant to be ready --
-  // these are curated DEMO-ONLY fixtures, not output from the real generator.
+  // DEMO ONLY: automatable: "yes" is hand-set on all four, same as automationEligibility
+  // above. None of these four cases would actually compute to "yes" via
+  // computeAutomatable(), for two different reasons:
+  //   - All four lack assertionProvenance: only the real generator's
+  //     applyVerifiedAssertions() stamps that onto a step, and these are hand-built
+  //     literals, not generator output. That alone is why TC-DEMO-PASS and
+  //     TC-DEMO-DEFECT would compute to "needs-human-input" despite a selectorHint
+  //     that genuinely matches the real exploration data.
+  //   - TC-DEMO-HEAL and TC-DEMO-REMOVED additionally use a deliberately stale
+  //     selectorHint, to exercise runtime same-page healing -- a different reason,
+  //     stacked on top of the same missing-provenance gap.
+  // These are curated fixtures simulating already-vetted cases, never output from the
+  // real generator pipeline; see tests/unit/automatable-no-handset.spec.ts, which
+  // enforces that no file under src/ and no non-demo script sets automatable by hand.
   const testCases = [
     {
       testCaseId: "TC-DEMO-PASS", title: "Login is visible", objective: "A genuinely passing case", preconditions: [], testData: "demo",
