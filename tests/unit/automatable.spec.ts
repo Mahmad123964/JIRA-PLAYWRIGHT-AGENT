@@ -1,9 +1,51 @@
 import { test, expect } from "@playwright/test";
+import fs from "fs";
+import path from "path";
 import { computeAutomatable } from "../../src/test-case-generator";
 import type { TestCase } from "../../src/test-case-generator";
 import type { ExplorationResult } from "../../src/browser-explorer";
-import { createApprovalStore, approveTestCase, markReadyForAutomation, editTestCase } from "../../src/approval-store";
+import { createApprovalStore, approveTestCase, markReadyForAutomation, editTestCase, loadApprovalStore } from "../../src/approval-store";
 import { importSkillOutput } from "../../src/skill-import";
+
+const STORE_DIR = path.resolve(__dirname, "../../test-cases");
+
+/** Writes a store file in the exact pre-Phase-8b shape: no automatable field anywhere. */
+function writeLegacyStore(storeId: string, testCaseOverrides: Record<string, unknown>, explorationResult?: ExplorationResult): void {
+  if (!fs.existsSync(STORE_DIR)) fs.mkdirSync(STORE_DIR, { recursive: true });
+  const legacyTestCase = {
+    testCaseId: "TC-LEGACY-001",
+    title: "Legacy case",
+    objective: "A case saved before automatable existed",
+    preconditions: [],
+    testData: "demo",
+    steps: [{ step: 1, action: "Do something", expected: "Something happens" }],
+    expectedResult: "Something happens",
+    priority: "Low",
+    testType: "Functional",
+    module: "Legacy",
+    sourceRequirements: [],
+    explorationReferences: [],
+    assumptions: [],
+    risks: [],
+    status: "PENDING_APPROVAL",
+    automationEligibility: "UNKNOWN",
+    sources: [{ type: "requirement", requirement: "n/a" }],
+    generatedAt: new Date().toISOString(),
+    ...testCaseOverrides,
+    // automatable intentionally absent -- this is the point of the fixture.
+  };
+  const legacyStore = {
+    storeId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    module: "Legacy",
+    scope: "PreBridge",
+    explorationResult,
+    approvalRecords: [],
+    testCases: [legacyTestCase],
+  };
+  fs.writeFileSync(path.join(STORE_DIR, `${storeId}.json`), JSON.stringify(legacyStore, null, 2), "utf-8");
+}
 
 function makeExploration(): ExplorationResult {
   return {
@@ -201,5 +243,56 @@ test.describe("computeAutomatable (Phase 8b automation bridge)", () => {
     const exploration = makeExploration();
     const tc = baseCase({ title: "Visual layout looks correct on mobile" });
     expect(computeAutomatable(tc, exploration)).toBe("manual-only");
+  });
+
+  test("9. a pre-Phase-8b store (no automatable field) is backfilled on load, never silently UNKNOWN/BLOCKED -- verified case", () => {
+    const storeId = "approval-legacy-verified-unit-test";
+    const exploration = makeExploration();
+    writeLegacyStore(
+      storeId,
+      {
+        steps: [{
+          step: 1,
+          action: "Click Login",
+          expected: "Login is visible",
+          selectorHint: "getByRole('button', { name: 'Login' })",
+          sourceElementId: "LOGIN",
+          expectedAssertion: { type: "visible" },
+          assertionProvenance: [{ type: "browser-exploration", observationId: "LOGIN" }],
+        }],
+      },
+      exploration
+    );
+    try {
+      const loaded = loadApprovalStore(storeId);
+      expect(loaded).not.toBeNull();
+      // Backfilled, not missing, not coerced to an automationEligibility-shaped value.
+      expect(loaded!.testCases[0].automatable).toBe("yes");
+      expect(["UNKNOWN", "BLOCKED"]).not.toContain(loaded!.testCases[0].automatable);
+
+      approveTestCase(loaded!, "TC-LEGACY-001", "reviewer");
+      const result = markReadyForAutomation(loaded!, "TC-LEGACY-001");
+      expect(result.success).toBe(true);
+    } finally {
+      fs.rmSync(path.join(STORE_DIR, `${storeId}.json`), { force: true });
+    }
+  });
+
+  test("9b. a pre-Phase-8b store with no verification evidence is backfilled to needs-human-input, with a clear refusal, never silently yes", () => {
+    const storeId = "approval-legacy-unverified-unit-test";
+    writeLegacyStore(storeId, {});
+    try {
+      const loaded = loadApprovalStore(storeId);
+      expect(loaded).not.toBeNull();
+      expect(loaded!.testCases[0].automatable).toBe("needs-human-input");
+
+      approveTestCase(loaded!, "TC-LEGACY-001", "reviewer");
+      const result = markReadyForAutomation(loaded!, "TC-LEGACY-001");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('automatable is "needs-human-input"');
+      expect(result.error).not.toContain("undefined");
+    } finally {
+      fs.rmSync(path.join(STORE_DIR, `${storeId}.json`), { force: true });
+    }
   });
 });

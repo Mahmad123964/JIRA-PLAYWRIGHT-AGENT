@@ -106,7 +106,18 @@ export function loadApprovalStore(storeId: string): ApprovalStore | null {
   if (!fs.existsSync(filePath)) return null;
   try {
     const raw = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(raw) as ApprovalStore;
+    const store = JSON.parse(raw) as ApprovalStore;
+    // Backward compatibility: a store saved before the automatable field existed (Phase 8b)
+    // has no automatable on its test cases. Never let that silently read as UNKNOWN/BLOCKED
+    // (those are automationEligibility values, a different field) or as falsy/"undefined" --
+    // recompute it the same deterministic way generation would have, using whatever
+    // exploration data this store already has.
+    for (const tc of store.testCases) {
+      if (!tc.automatable) {
+        tc.automatable = computeAutomatable(tc, store.explorationResult);
+      }
+    }
+    return store;
   } catch {
     return null;
   }
