@@ -52,6 +52,7 @@ function testCase(id: string): TestCase {
     risks: [],
     status: "READY_FOR_AUTOMATION",
     automationEligibility: "ELIGIBLE",
+    automatable: "yes",
     sources: [{ type: "requirement", requirement: "Login works" }],
     generatedAt: new Date().toISOString(),
   } as unknown as TestCase;

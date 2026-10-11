@@ -2,6 +2,7 @@
 // qa-test-case-generation skill (github.com/saleem-daqa/qa-test-case-generation,
 // MIT licence). See THIRD_PARTY_NOTICES.md. No files from that repo are vendored here.
 import { sanitizeSecrets, detectPromptInjections } from "./document-ingestion";
+import { computeAutomatable } from "./test-case-generator";
 import type { TestCase, TestCasePriority, TestCaseType } from "./test-case-generator";
 
 // ----------------------------------------------------------------------------
@@ -307,22 +308,32 @@ export function importSkillOutput(text: string, module: string): SkillImportResu
     const testType = mapTestType(sanitizedCells["Test Type"] || "");
     const module_ = sanitizedCells["Module / Feature"] || module;
 
+    const title = `${skillSourceTag === "Inferred QA Risk" ? "[INFERRED QA RISK — NO VERIFIED EVIDENCE] " : ""}${sanitizedCells["Test Scenario"]}`;
+    const objective = sanitizedCells["Test Scenario"];
+    const steps: TestCase["steps"] = [
+      {
+        step: 1,
+        action: sanitizedCells["Test Steps"],
+        expected: sanitizedCells["Expected Result"],
+        // The skill's free-text Expected Result is never promoted to expectedAssertion:
+        // nothing here has been verified against a real selector or human-supplied outcome.
+        needsHumanInput: "NEEDS_HUMAN_INPUT: imported from manual-track skill output, no verified selector or assertion",
+      },
+    ];
+    const sources: TestCase["sources"] = [
+      {
+        type: "manual-skill-import",
+        requirement: skillSourceTag,
+      },
+    ];
+
     const tc: TestCase = {
       testCaseId: sanitizedCells["Test Case ID"] || `TC-IMPORT-${String(counter).padStart(3, "0")}`,
-      title: `${skillSourceTag === "Inferred QA Risk" ? "[INFERRED QA RISK — NO VERIFIED EVIDENCE] " : ""}${sanitizedCells["Test Scenario"]}`,
-      objective: sanitizedCells["Test Scenario"],
+      title,
+      objective,
       preconditions: sanitizedCells["Preconditions"] ? [sanitizedCells["Preconditions"]] : [],
       testData: sanitizedCells["Test Data"] || "",
-      steps: [
-        {
-          step: 1,
-          action: sanitizedCells["Test Steps"],
-          expected: sanitizedCells["Expected Result"],
-          // The skill's free-text Expected Result is never promoted to expectedAssertion:
-          // nothing here has been verified against a real selector or human-supplied outcome.
-          needsHumanInput: "NEEDS_HUMAN_INPUT: imported from manual-track skill output, no verified selector or assertion",
-        },
-      ],
+      steps,
       expectedResult: sanitizedCells["Expected Result"],
       priority,
       testType,
@@ -333,12 +344,9 @@ export function importSkillOutput(text: string, module: string): SkillImportResu
       risks: skillSourceTag === "Inferred QA Risk" ? ["Inferred QA Risk: no requirement or mockup evidence backs this case"] : [],
       status: "PENDING_APPROVAL",
       automationEligibility: "UNKNOWN",
-      sources: [
-        {
-          type: "manual-skill-import",
-          requirement: skillSourceTag,
-        },
-      ],
+      // No ExplorationResult exists at import time -- never "yes"; see computeAutomatable's rules.
+      automatable: computeAutomatable({ title, objective, steps, sources }),
+      sources,
       generatedAt,
     };
 

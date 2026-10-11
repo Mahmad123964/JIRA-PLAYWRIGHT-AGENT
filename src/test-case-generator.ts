@@ -58,10 +58,14 @@ export interface TestCase {
   risks: string[];
   status: TestCaseStatus;
   automationEligibility: "ELIGIBLE" | "BLOCKED" | "UNKNOWN";
+  /** Precondition for READY_FOR_AUTOMATION; see computeAutomatable(). Never set by hand except in test fixtures and the demo script. */
+  automatable: Automatable;
   sources: TestCaseSource[];
   provenance?: TestCaseSource[];
   generatedAt: string;
 }
+
+export type Automatable = "yes" | "needs-human-input" | "manual-only";
 
 export interface HumanExpectedOutcome {
   requirement?: string;
@@ -326,6 +330,62 @@ function applyVerifiedAssertions(
   });
 }
 
+// ----------------------------------------------------------------------------
+// automatable: pure, deterministic precondition for READY_FOR_AUTOMATION
+// ----------------------------------------------------------------------------
+
+/** True only when the step's selectorHint resolves to a real discovered element -- the same check applyVerifiedAssertions() uses. */
+function isStepSelectorVerified(step: TestStep, elements: DiscoveredElement[]): boolean {
+  if (!step.sourceElementId || !step.selectorHint) return false;
+  const element = elements.find((item) => item.id === step.sourceElementId);
+  return Boolean(element && element.selectorCandidates.includes(step.selectorHint));
+}
+
+/** True only when expectedAssertion traces back to a verified element or an explicit human-supplied outcome -- never the skill's prose. */
+function isStepAssertionProven(step: TestStep): boolean {
+  if (!step.expectedAssertion || !step.expectedAssertion.type) return false;
+  return Boolean(step.assertionProvenance?.some((s) => s.type === "browser-exploration" || s.type === "human-supplied"));
+}
+
+/** A case whose only Source tag is "Inferred QA Risk" carries no requirement or mockup evidence by definition. */
+function isInferredQaRiskOnly(tc: Pick<TestCase, "sources">): boolean {
+  return tc.sources.length > 0 && tc.sources.every((s) => s.requirement === "Inferred QA Risk");
+}
+
+/** Cases whose steps inherently require visual or subjective human judgment, not (yet) signaled by any generator or importer today -- reserved for that case. */
+const INHERENTLY_MANUAL_PATTERN = /\b(visual(ly)?|subjective|usability|aesthetic|look and feel)\b/i;
+
+/**
+ * Pure, deterministic precondition for READY_FOR_AUTOMATION. No LLM, no network.
+ *
+ * "yes" only when every step has a selector verified against real exploration
+ * data AND a non-empty expectedAssertion either derived from that verified
+ * element or explicitly human-supplied. A case whose only Source tag is
+ * "Inferred QA Risk" can never be "yes" on its own -- it becomes eligible
+ * only once its steps gain that same verified evidence, same as any other
+ * case. "manual-only" is for Inferred QA Risk cases with no verified UI
+ * target at all, or cases requiring visual/subjective judgment; everything
+ * else that isn't fully proven is "needs-human-input".
+ */
+export function computeAutomatable(tc: Pick<TestCase, "title" | "objective" | "steps" | "sources">, explorationResult?: ExplorationResult): Automatable {
+  if (INHERENTLY_MANUAL_PATTERN.test(tc.title) || INHERENTLY_MANUAL_PATTERN.test(tc.objective)) {
+    return "manual-only";
+  }
+
+  if (tc.steps.length === 0) return "needs-human-input";
+
+  const elements = explorationResult?.elements ?? [];
+  const allStepsProven = tc.steps.every((step) => isStepSelectorVerified(step, elements) && isStepAssertionProven(step));
+  if (allStepsProven) return "yes";
+
+  if (isInferredQaRiskOnly(tc)) {
+    const anyVerifiedTarget = tc.steps.some((step) => isStepSelectorVerified(step, elements));
+    if (!anyVerifiedTarget) return "manual-only";
+  }
+
+  return "needs-human-input";
+}
+
 function generateNegativeSteps(
   req: string,
   relatedElements: DiscoveredElement[]
@@ -386,17 +446,21 @@ function generateTestCasesForRequirement(
   const explorationBlocked = explorationResult.explorationStatus === "FAILED" || explorationResult.explorationStatus === "BLOCKED";
 
   if (isUnknownRequirement(req) || explorationBlocked) {
+    const clarificationSteps: TestStep[] = [{ step: 1, action: "Clarify requirement with stakeholder", expected: "Requirement is defined" }];
+    const clarificationSources = buildSources(req, jiraTicketKey, notionPageId);
+    const clarificationTitle = `${explorationBlocked ? "[BLOCKED / NEEDS MANUAL VERIFICATION]" : "[REQUIRES CLARIFICATION]"} ${req.slice(0, 80)}`;
+    const clarificationObjective = explorationBlocked
+      ? "Browser exploration did not verify this requirement — manual verification is required"
+      : "Requirement is unclear or underspecified — cannot generate test case";
     const tc: TestCase = {
       testCaseId: nextTcId(module),
-      title: `${explorationBlocked ? "[BLOCKED / NEEDS MANUAL VERIFICATION]" : "[REQUIRES CLARIFICATION]"} ${req.slice(0, 80)}`,
-      objective: explorationBlocked
-        ? "Browser exploration did not verify this requirement — manual verification is required"
-        : "Requirement is unclear or underspecified — cannot generate test case",
+      title: clarificationTitle,
+      objective: clarificationObjective,
       preconditions: [explorationBlocked
         ? "Browser exploration must complete successfully before automation"
         : "Requirement must be clarified before test can be written"],
       testData: explorationBlocked ? "UNKNOWN / BLOCKED / NEEDS_MANUAL_VERIFICATION" : "UNKNOWN / REQUIRES CLARIFICATION",
-      steps: [{ step: 1, action: "Clarify requirement with stakeholder", expected: "Requirement is defined" }],
+      steps: clarificationSteps,
       expectedResult: explorationBlocked ? "UNKNOWN / BLOCKED / NEEDS_MANUAL_VERIFICATION" : "UNKNOWN / REQUIRES CLARIFICATION",
       priority: "Low",
       testType: "Functional",
@@ -407,8 +471,9 @@ function generateTestCasesForRequirement(
       risks: ["Test cannot be automated without clear requirement"],
       status: "PENDING_APPROVAL",
       automationEligibility: explorationBlocked ? "BLOCKED" : "UNKNOWN",
-      provenance: buildSources(req, jiraTicketKey, notionPageId),
-      sources: buildSources(req, jiraTicketKey, notionPageId),
+      automatable: computeAutomatable({ title: clarificationTitle, objective: clarificationObjective, steps: clarificationSteps, sources: clarificationSources }, explorationResult),
+      provenance: clarificationSources,
+      sources: clarificationSources,
       generatedAt: new Date().toISOString(),
     };
     cases.push(tc);
@@ -440,10 +505,13 @@ function generateTestCasesForRequirement(
     input.humanExpectedOutcomes,
     req
   );
+  const positiveTitle = `[Positive] ${req.slice(0, 100)}`;
+  const positiveObjective = `Verify that: ${req}`;
+  const positiveSources = buildSources(req, jiraTicketKey, notionPageId, relatedElements[0]);
   cases.push({
     testCaseId: nextTcId(module),
-    title: `[Positive] ${req.slice(0, 100)}`,
-    objective: `Verify that: ${req}`,
+    title: positiveTitle,
+    objective: positiveObjective,
     preconditions,
     testData: "Valid test data as per requirement",
     steps: positiveSteps,
@@ -457,8 +525,9 @@ function generateTestCasesForRequirement(
     risks: relatedElements.length === 0 ? ["No UI elements discovered — selector may need manual verification"] : [],
     status: "PENDING_APPROVAL",
     automationEligibility: "ELIGIBLE",
-    provenance: buildSources(req, jiraTicketKey, notionPageId, relatedElements[0]),
-    sources: buildSources(req, jiraTicketKey, notionPageId, relatedElements[0]),
+    automatable: computeAutomatable({ title: positiveTitle, objective: positiveObjective, steps: positiveSteps, sources: positiveSources }, explorationResult),
+    provenance: positiveSources,
+    sources: positiveSources,
     generatedAt: new Date().toISOString(),
   });
 
@@ -471,10 +540,13 @@ function generateTestCasesForRequirement(
       input.humanExpectedOutcomes,
       req
     );
+    const negativeTitle = `[Negative] ${req.slice(0, 100)}`;
+    const negativeObjective = `Verify system handles invalid/missing input for: ${req}`;
+    const negativeSources = buildSources(req, jiraTicketKey, notionPageId, relatedElements[0]);
     cases.push({
       testCaseId: nextTcId(module),
-      title: `[Negative] ${req.slice(0, 100)}`,
-      objective: `Verify system handles invalid/missing input for: ${req}`,
+      title: negativeTitle,
+      objective: negativeObjective,
       preconditions,
       testData: "Invalid or empty test data",
       steps: negativeSteps,
@@ -488,8 +560,9 @@ function generateTestCasesForRequirement(
       risks: relatedElements.length === 0 ? ["No UI elements discovered — manual verification needed"] : [],
       status: "PENDING_APPROVAL",
       automationEligibility: "ELIGIBLE",
-      provenance: buildSources(req, jiraTicketKey, notionPageId, relatedElements[0]),
-      sources: buildSources(req, jiraTicketKey, notionPageId, relatedElements[0]),
+      automatable: computeAutomatable({ title: negativeTitle, objective: negativeObjective, steps: negativeSteps, sources: negativeSources }, explorationResult),
+      provenance: negativeSources,
+      sources: negativeSources,
       generatedAt: new Date().toISOString(),
     });
   }

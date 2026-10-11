@@ -376,12 +376,16 @@ test.describe("Phase 3 — Approval Gate", () => {
   function makeStore() {
     const exploration = makeExplorationResult();
     const genResult = generateTestCases({
-      requirements: ["User can log in", "Invalid credentials show error", "User can log out"],
+      // "User can access Login" (not "log in") so findRelatedElements' keyword match
+      // actually finds the Login button -- store.testCases[0] then has a genuinely
+      // verified selector + assertion, matching real generator behavior (Phase 8b
+      // computeAutomatable), rather than relying on a case that was never automatable.
+      requirements: ["User can access Login", "Invalid credentials show error", "User can log out"],
       explorationResult: exploration,
       module: "Authentication",
       scope: "Login",
     });
-    return createApprovalStore("Authentication", "Login", genResult.testCases);
+    return createApprovalStore("Authentication", "Login", genResult.testCases, exploration);
   }
 
   // 13. Test case approval

@@ -57,6 +57,9 @@ function makeCase(): TestCase {
     risks: [],
     status: "PENDING_APPROVAL",
     automationEligibility: "ELIGIBLE",
+    // Hand-set: this fixture's exploration has no elements, so computeAutomatable's static
+    // selector check wouldn't verify it, but the case is meant to simulate an already-vetted one.
+    automatable: "yes",
     sources: [{ type: "requirement", requirement: "Login works" }],
     generatedAt: new Date().toISOString(),
   };

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { sanitizeSecrets } from "./document-ingestion";
+import { computeAutomatable } from "./test-case-generator";
 import type { TestCase, TestCaseStatus } from "./test-case-generator";
 import type { ExplorationResult } from "./browser-explorer";
 import type { SkillImportReport } from "./skill-import";
@@ -190,16 +191,19 @@ export function editTestCase(
     return { success: false, error: `Cannot edit a rejected test case: ${testCaseId}` };
   }
 
-  // Never allow status to be set to READY_FOR_AUTOMATION directly via edit
+  // Never allow status to be set to READY_FOR_AUTOMATION directly via edit, and never
+  // let a caller hand-set automatable -- it is always recomputed below.
   const safeUpdates = { ...updates };
   delete safeUpdates.status;
   delete safeUpdates.testCaseId;
+  delete safeUpdates.automatable;
 
   const previousVersion = { ...tc };
   const sanitizedUpdates = sanitizeTestCaseUpdates(safeUpdates);
   Object.assign(tc, sanitizedUpdates);
   // Editing invalidates the previous approval and returns the case to the human gate.
   tc.status = "PENDING_APPROVAL";
+  tc.automatable = computeAutomatable(tc, store.explorationResult);
 
   const record: ApprovalRecord = {
     testCaseId,
@@ -227,6 +231,13 @@ export function markReadyForAutomation(
     return {
       success: false,
       error: `Only APPROVED test cases can become READY_FOR_AUTOMATION. Current status: ${tc.status}`,
+    };
+  }
+
+  if (tc.automatable !== "yes") {
+    return {
+      success: false,
+      error: `Cannot mark READY_FOR_AUTOMATION: automatable is "${tc.automatable}", not "yes". ${testCaseId} needs a verified selector and a proven or human-supplied assertion on every step.`,
     };
   }
 

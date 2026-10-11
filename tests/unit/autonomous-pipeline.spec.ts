@@ -21,7 +21,7 @@ function exploration(status: ExplorationResult["explorationStatus"] = "SUCCESS")
 
 function testCase(status: TestCase["status"] = "READY_FOR_AUTOMATION"): TestCase {
   return {
-    testCaseId: "TC-AUTH-001", title: "Login", objective: "Verify login", preconditions: [], testData: "No secrets", steps: [{ step: 1, action: "Click Login", expected: "Login action is triggered", selectorHint: "getByTestId('login')", sourceElementId: "ELEM-1" }], expectedResult: "User can log in", priority: "High", testType: "Functional", module: "Auth", sourceRequirements: ["User can log in"], explorationReferences: ["ELEM-1"], assumptions: [], risks: [], status, automationEligibility: "ELIGIBLE", sources: [{ type: "requirement", requirement: "User can log in" }], generatedAt: new Date().toISOString(),
+    testCaseId: "TC-AUTH-001", title: "Login", objective: "Verify login", preconditions: [], testData: "No secrets", steps: [{ step: 1, action: "Click Login", expected: "Login action is triggered", selectorHint: "getByTestId('login')", sourceElementId: "ELEM-1" }], expectedResult: "User can log in", priority: "High", testType: "Functional", module: "Auth", sourceRequirements: ["User can log in"], explorationReferences: ["ELEM-1"], assumptions: [], risks: [], status, automationEligibility: "ELIGIBLE", automatable: "yes", sources: [{ type: "requirement", requirement: "User can log in" }], generatedAt: new Date().toISOString(),
   };
 }
 

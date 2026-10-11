@@ -47,6 +47,7 @@ function makeCase(status: TestCase["status"], withAssertion = true): TestCase {
     risks: [],
     status,
     automationEligibility: "ELIGIBLE",
+    automatable: "yes",
     sources: [{ type: "requirement", requirement: "Login works" }],
     generatedAt: new Date().toISOString(),
   };

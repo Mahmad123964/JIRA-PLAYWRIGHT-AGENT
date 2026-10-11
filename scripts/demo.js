@@ -66,31 +66,36 @@ function buildDemoCases(url) {
     elements, workflows: [], observations: [], requirementsCoverage: [], warnings: [], provenance: [], secretsMaskedCount: 0, promptInjectionDetected: false,
   };
   const now = () => new Date().toISOString();
+  // automatable: "yes" is hand-set on all four, same as automationEligibility above.
+  // TC-DEMO-HEAL and TC-DEMO-REMOVED deliberately use a stale selectorHint to exercise
+  // runtime healing, so computeAutomatable's static selector check (which only looks at
+  // the current exploration data) would not reflect that these are meant to be ready --
+  // these are curated DEMO-ONLY fixtures, not output from the real generator.
   const testCases = [
     {
       testCaseId: "TC-DEMO-PASS", title: "Login is visible", objective: "A genuinely passing case", preconditions: [], testData: "demo",
       steps: [{ step: 1, action: "Inspect login button", expected: "Login is visible", expectedAssertion: { type: "visible" }, selectorHint: "getByRole('button', { name: 'Login' })", sourceElementId: "LOGIN" }],
       expectedResult: "Login is visible", priority: "High", testType: "Functional", module: "Demo", sourceRequirements: ["Login is visible"], explorationReferences: ["LOGIN"], assumptions: [], risks: [],
-      status: "PENDING_APPROVAL", automationEligibility: "ELIGIBLE", sources: [{ type: "browser-exploration", observationId: "LOGIN", page: url }], generatedAt: now(),
+      status: "PENDING_APPROVAL", automationEligibility: "ELIGIBLE", automatable: "yes", sources: [{ type: "browser-exploration", observationId: "LOGIN", page: url }], generatedAt: now(),
     },
     {
       testCaseId: "TC-DEMO-HEAL", title: "Broken login locator heals", objective: "A stale locator that same-page healing repairs", preconditions: [], testData: "demo",
       // selectorHint deliberately references a name that no longer exists ("Old Login"); the real element has role=button name="Login".
       steps: [{ step: 1, action: "Click Login", expected: "Login is visible", expectedAssertion: { type: "visible" }, selectorHint: "getByRole('button', { name: 'Old Login' })", sourceElementId: "LOGIN" }],
       expectedResult: "Login is visible", priority: "High", testType: "Functional", module: "Demo", sourceRequirements: ["Login is visible"], explorationReferences: ["LOGIN"], assumptions: [], risks: [],
-      status: "PENDING_APPROVAL", automationEligibility: "ELIGIBLE", sources: [{ type: "browser-exploration", observationId: "LOGIN", page: url }], generatedAt: now(),
+      status: "PENDING_APPROVAL", automationEligibility: "ELIGIBLE", automatable: "yes", sources: [{ type: "browser-exploration", observationId: "LOGIN", page: url }], generatedAt: now(),
     },
     {
       testCaseId: "TC-DEMO-REMOVED", title: "Removed element stays FAIL", objective: "Nothing on the page matches; healing must not invent a match", preconditions: [], testData: "demo",
       steps: [{ step: 1, action: "Click removed action", expected: "Removed action is visible", expectedAssertion: { type: "visible" }, selectorHint: "getByRole('button', { name: 'Old Removed action' })", sourceElementId: "REMOVED" }],
       expectedResult: "Removed action is visible", priority: "High", testType: "Functional", module: "Demo", sourceRequirements: ["Click removed action"], explorationReferences: ["REMOVED"], assumptions: [], risks: [],
-      status: "PENDING_APPROVAL", automationEligibility: "ELIGIBLE", sources: [{ type: "browser-exploration", observationId: "REMOVED", page: url }], generatedAt: now(),
+      status: "PENDING_APPROVAL", automationEligibility: "ELIGIBLE", automatable: "yes", sources: [{ type: "browser-exploration", observationId: "REMOVED", page: url }], generatedAt: now(),
     },
     {
       testCaseId: "TC-DEMO-DEFECT", title: "Real assertion mismatch", objective: "A verified application defect, classified A", preconditions: [], testData: "demo",
       steps: [{ step: 1, action: "Inspect heading", expected: "Wrong heading is displayed", expectedAssertion: { type: "text", value: "Wrong heading" }, selectorHint: "getByRole('heading', { name: 'Welcome back' })", sourceElementId: "HEADING" }],
       expectedResult: "Wrong heading is displayed", priority: "High", testType: "Functional", module: "Demo", sourceRequirements: ["Heading is correct"], explorationReferences: ["HEADING"], assumptions: [], risks: [],
-      status: "PENDING_APPROVAL", automationEligibility: "ELIGIBLE", sources: [{ type: "browser-exploration", observationId: "HEADING", page: url }], generatedAt: now(),
+      status: "PENDING_APPROVAL", automationEligibility: "ELIGIBLE", automatable: "yes", sources: [{ type: "browser-exploration", observationId: "HEADING", page: url }], generatedAt: now(),
     },
   ];
   return { exploration, testCases };

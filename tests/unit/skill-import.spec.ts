@@ -196,7 +196,7 @@ test.describe("Skill import (manual-track Markdown/CSV)", () => {
     expect(result.accepted[0].sources[0].requirement).toBe("Inferred QA Risk");
   });
 
-  test("9. end-to-end: import -> store -> approval gate unchanged", () => {
+  test("9. end-to-end: import -> store -> approval gate unchanged; an imported case never reaches READY_FOR_AUTOMATION", () => {
     const text = [
       HEADER,
       SEP,
@@ -215,13 +215,18 @@ test.describe("Skill import (manual-track Markdown/CSV)", () => {
     expect(getPendingApproval(store).length).toBe(1);
 
     const tcId = store.testCases[0].testCaseId;
+    expect(store.testCases[0].automatable).toBe("needs-human-input");
     // Cannot skip straight to READY_FOR_AUTOMATION without APPROVED first.
     expect(markReadyForAutomation(store, tcId).success).toBe(false);
 
     const approveResult = approveTestCase(store, tcId, "reviewer@example.com");
     expect(approveResult.success).toBe(true);
-    expect(markReadyForAutomation(store, tcId).success).toBe(true);
-    expect(store.testCases[0].status).toBe("READY_FOR_AUTOMATION");
+    // Approved, but still blocked: imported manual cases never have a verified selector,
+    // so automatable is never "yes" -- see rule 5/6 (Phase 8b).
+    const readyResult = markReadyForAutomation(store, tcId);
+    expect(readyResult.success).toBe(false);
+    expect(readyResult.error).toMatch(/automatable is "needs-human-input"/);
+    expect(store.testCases[0].status).toBe("APPROVED");
   });
 
   test("10. status is always PENDING_APPROVAL even when the skill's Status column says otherwise", () => {
